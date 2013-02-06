@@ -43,9 +43,7 @@ enum {
     CONNECT,
     DISCONNECT,
     SET_SCALING_MODE,
-#ifdef QCOM_HARDWARE
     PERFORM_QCOM_OPERATION,
-#endif
 };
 
 
@@ -220,7 +218,6 @@ public:
         return result;
     }
 
-#ifdef QCOM_HARDWARE
     virtual status_t performQcomOperation(int operation, int arg1, int arg2, int arg3) {
         Parcel data, reply;
         data.writeInterfaceToken(ISurfaceTexture::getInterfaceDescriptor());
@@ -236,7 +233,6 @@ public:
         result = reply.readInt32();
         return result;
     }
-#endif
 };
 
 IMPLEMENT_META_INTERFACE(SurfaceTexture, "android.gui.SurfaceTexture");
@@ -357,7 +353,6 @@ status_t BnSurfaceTexture::onTransact(
             reply->writeInt32(res);
             return NO_ERROR;
         } break;
-#ifdef QCOM_HARDWARE
         case PERFORM_QCOM_OPERATION: {
             CHECK_INTERFACE(ISurfaceTexture, data, reply);
             int operation = data.readInt32();
@@ -368,7 +363,6 @@ status_t BnSurfaceTexture::onTransact(
             reply->writeInt32(res);
             return NO_ERROR;
         } break;
-#endif
     }
     return BBinder::onTransact(code, data, reply, flags);
 }

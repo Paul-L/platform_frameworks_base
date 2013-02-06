@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +28,8 @@ import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneBase;
 import com.android.internal.telephony.RILConstants;
 import com.android.internal.telephony.RetryManager;
+import com.android.internal.telephony.ApnSetting;
+import android.telephony.ServiceState;
 
 /**
  * {@hide}
@@ -75,9 +78,9 @@ public class GsmDataConnection extends DataConnection {
     void onConnect(ConnectionParams cp) {
         mApn = cp.apn;
 
-        if (DBG) log("Connecting to carrier: '" + mApn.carrier
+        if (DBG) log("Connecting to carrier: '" + ((ApnSetting)mApn).carrier
                 + "' APN: '" + mApn.apn
-                + "' proxy: '" + mApn.proxy + "' port: '" + mApn.port);
+                + "' proxy: '" + ((ApnSetting)mApn).proxy + "' port: '" + ((ApnSetting)mApn).port);
 
         createTime = -1;
         lastFailTime = -1;
@@ -87,24 +90,18 @@ public class GsmDataConnection extends DataConnection {
         Message msg = obtainMessage(EVENT_SETUP_DATA_CONNECTION_DONE, cp);
         msg.obj = cp;
 
-        int authType = mApn.authType;
-        if (authType == -1) {
-            authType = (mApn.user != null) ? RILConstants.SETUP_DATA_AUTH_PAP_CHAP :
-                RILConstants.SETUP_DATA_AUTH_NONE;
-        }
+        String protocol = getDataCallProtocol();
 
-        String protocol;
-        if (phone.getServiceState().getRoaming()) {
-            protocol = mApn.roamingProtocol;
-        } else {
-            protocol = mApn.protocol;
+        String radioTech = Integer.toString(getRadioTechnology(RILConstants.SETUP_DATA_TECH_GSM));
+        if (phone.getServiceState().getRadioTechnology() == ServiceState.RADIO_TECHNOLOGY_EHRPD) {
+            radioTech = Integer.toString(getRadioTechnology(RILConstants.SETUP_DATA_TECH_CDMA));
         }
 
         phone.mCM.setupDataCall(
-                Integer.toString(getRadioTechnology(RILConstants.SETUP_DATA_TECH_GSM)),
+                radioTech,
                 Integer.toString(mProfileId),
                 mApn.apn, mApn.user, mApn.password,
-                Integer.toString(authType),
+                Integer.toString(mApn.authType),
                 protocol, msg);
     }
 
@@ -137,11 +134,11 @@ public class GsmDataConnection extends DataConnection {
             // if Proxy is an IP-address.
             // Otherwise, the default APN will not be restored anymore.
             if (!mApn.types[0].equals(Phone.APN_TYPE_MMS)
-                || !isIpAddress(mApn.mmsProxy)) {
+                || !isIpAddress(((ApnSetting)mApn).mmsProxy)) {
                 log(String.format(
                         "isDnsOk: return false apn.types[0]=%s APN_TYPE_MMS=%s isIpAddress(%s)=%s",
-                        mApn.types[0], Phone.APN_TYPE_MMS, mApn.mmsProxy,
-                        isIpAddress(mApn.mmsProxy)));
+                        mApn.types[0], Phone.APN_TYPE_MMS, ((ApnSetting)mApn).mmsProxy,
+                        isIpAddress(((ApnSetting)mApn).mmsProxy)));
                 return false;
             }
         }

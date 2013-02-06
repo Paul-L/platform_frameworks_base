@@ -16,6 +16,9 @@
 
 package com.android.internal.telephony;
 
+import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
+import com.android.internal.telephony.cdma.RuimRecords;
+
 import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.Message;
@@ -30,6 +33,9 @@ import android.telephony.SignalStrength;
 public abstract class ServiceStateTracker extends Handler {
 
     protected CommandsInterface cm;
+    protected UiccManager mUiccManager = null;
+    protected UiccCardApplication mUiccApplcation = null;
+    protected IccRecords mIccRecords = null;
 
     public ServiceState ss;
     protected ServiceState newSS;
@@ -72,6 +78,7 @@ public abstract class ServiceStateTracker extends Handler {
     protected RegistrantList mDetachedRegistrants = new RegistrantList();
     protected RegistrantList mNetworkAttachedRegistrants = new RegistrantList();
     protected RegistrantList mPsRestrictEnabledRegistrants = new RegistrantList();
+    protected RegistrantList mRatChangedRegistrants = new RegistrantList();
     protected RegistrantList mPsRestrictDisabledRegistrants = new RegistrantList();
 
     /* Radio power off pending flag and tag counter */
@@ -124,6 +131,11 @@ public abstract class ServiceStateTracker extends Handler {
     protected static final int EVENT_ERI_FILE_LOADED                   = 36;
     protected static final int EVENT_OTA_PROVISION_STATUS_CHANGE       = 37;
     protected static final int EVENT_SET_RADIO_POWER_OFF               = 38;
+    protected static final int EVENT_CDMA_SUBSCRIPTION_SOURCE_CHANGED  = 39;
+    protected static final int EVENT_CDMA_PRL_VERSION_CHANGED          = 40;
+    protected static final int EVENT_RADIO_ON                          = 41;
+    protected static final int EVENT_ICC_CHANGED                       = 42;
+    protected static final int EVENT_ICC_RECORD_EVENTS                 = 43;
 
     protected static final String TIMEZONE_PROPERTY = "persist.sys.timezone";
 
@@ -160,7 +172,15 @@ public abstract class ServiceStateTracker extends Handler {
     protected static final String REGISTRATION_DENIED_GEN  = "General";
     protected static final String REGISTRATION_DENIED_AUTH = "Authentication Failure";
 
-    public ServiceStateTracker() {
+    protected boolean isSubscriptionFromRuim = false;
+    protected CdmaSubscriptionSourceManager mCdmaSSM;
+    protected String mMdn;
+    protected String mPrlVersion;
+
+    public ServiceStateTracker(CommandsInterface ci) {
+        cm = ci;
+        mUiccManager = UiccManager.getInstance();
+        mUiccManager.registerForIccChanged(this, EVENT_ICC_CHANGED, null);
     }
 
     public boolean getDesiredPowerState() {
@@ -226,7 +246,6 @@ public abstract class ServiceStateTracker extends Handler {
     public void
     setRadioPower(boolean power) {
         mDesiredPowerState = power;
-
         setPowerStateToDesired();
     }
 
@@ -287,6 +306,28 @@ public abstract class ServiceStateTracker extends Handler {
                 }
                 break;
 
+            case EVENT_ICC_CHANGED:
+                updateIccAvailability();
+                break;
+
+            case EVENT_CDMA_SUBSCRIPTION_SOURCE_CHANGED:
+                handleCdmaSubscriptionSource(mCdmaSSM.getCdmaSubscriptionSource());
+                break;
+
+            case EVENT_CDMA_PRL_VERSION_CHANGED:
+                AsyncResult ar;
+                int[] result;
+
+                ar = (AsyncResult)msg.obj;
+                if (ar.exception != null || ar.result == null) {
+                    log("Error while fetching Prl");
+                    break;
+                }
+
+                result = (int[]) ar.result;
+                mPrlVersion = Integer.toString(result[0]);
+                break;
+
             default:
                 log("Unhandled message with number: " + msg.what);
                 break;
@@ -297,6 +338,7 @@ public abstract class ServiceStateTracker extends Handler {
     protected abstract void handlePollStateResult(int what, AsyncResult ar);
     protected abstract void updateSpnDisplay();
     protected abstract void setPowerStateToDesired();
+    protected abstract void updateIccAvailability();
     protected abstract void log(String s);
     protected abstract void loge(String s);
 
@@ -377,6 +419,21 @@ public abstract class ServiceStateTracker extends Handler {
     }
 
     /**
+     * Registration point for RAT change notification
+     * @param h handler to notify
+     * @param what what code of message when delivered
+     * @param obj placed in Message.obj
+     */
+    public void registerForRatChanged(Handler h, int what, Object obj) {
+        Registrant r = new Registrant(h, what, obj);
+        mRatChangedRegistrants.add(r);
+    }
+
+    public void unregisterForRatChanged(Handler h) {
+        mRatChangedRegistrants.remove(h);
+    }
+
+    /**
      * Registration point for transition out of packet service restricted zone.
      * @param h handler to notify
      * @param what what code of message when delivered
@@ -454,5 +511,55 @@ public abstract class ServiceStateTracker extends Handler {
     protected void cancelPollState() {
         // This will effectively cancel the rest of the poll requests.
         pollingContext = new int[1];
+    }
+
+    /**
+     * send signal-strength-changed notification if changed Called both for
+     * solicited and unsolicited signal strength updates
+     */
+    protected void onSignalStrengthResult(AsyncResult ar, PhoneBase phone, boolean isGsm) {
+        SignalStrength oldSignalStrength = mSignalStrength;
+
+        // This signal is used for both voice and data radio signal so parse
+        // all fields
+
+        if (ar.exception == null) {
+            mSignalStrength = new SignalStrength((SignalStrength) ar.result);
+        } else {
+            log("onSignalStrengthResult() Exception from RIL : " + ar.exception);
+            mSignalStrength = new SignalStrength();
+        }
+        mSignalStrength.setGsm(isGsm);
+
+        if (!mSignalStrength.equals(oldSignalStrength)) {
+            try {
+                // This takes care of delayed EVENT_POLL_SIGNAL_STRENGTH
+                // (scheduled after POLL_PERIOD_MILLIS) during Radio Technology
+                // Change)
+                phone.notifySignalStrength();
+            } catch (NullPointerException ex) {
+                log("onSignalStrengthResult() Phone already destroyed: " + ex
+                        + "SignalStrength not notified");
+            }
+        }
+    }
+
+    public String getMdnNumber() {
+        return mMdn;
+    }
+
+    /** Returns null if NV is not yet ready */
+    public String getPrlVersion() {
+        return mPrlVersion;
+    }
+
+    protected void handleCdmaSubscriptionSource(int newSubscriptionSource) {
+        log("Subscription Source : " + newSubscriptionSource);
+        isSubscriptionFromRuim =
+            (newSubscriptionSource == CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_RUIM);
+        if (!isSubscriptionFromRuim) {
+            // NV is ready when subscription source is NV
+            sendMessage(obtainMessage(EVENT_NV_READY));
+        }
     }
 }

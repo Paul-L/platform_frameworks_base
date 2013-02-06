@@ -25,7 +25,9 @@ import android.util.Log;
 import com.android.internal.telephony.BaseCommands;
 import com.android.internal.telephony.IccIoResult;
 import com.android.internal.telephony.UUSInfo;
+import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
 
+import java.util.ArrayList;
 import junit.framework.Assert;
 
 /**
@@ -211,10 +213,6 @@ class UsimDataDownloadCommands extends BaseCommands {
     @Override
     public void changeBarringPassword(String facility, String oldPwd, String newPwd,
             Message result) {
-    }
-
-    @Override
-    public void supplyNetworkDepersonalization(String netpin, Message result) {
     }
 
     @Override
@@ -607,5 +605,78 @@ class UsimDataDownloadCommands extends BaseCommands {
 
     @Override
     public void requestIsimAuthentication(String nonce, Message response) {
+    }
+
+    @Override
+    public void setSubscriptionMode (int subscriptionMode, Message result) {
+    }
+
+    @Override
+    public void setDataSubscription (Message result) {
+    }
+
+    @Override
+    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
+            Message result) {
+    }
+    
+    @Override
+    public void setTransmitPower(int powerLevel, Message result) {
+    }
+
+    @Override
+    public void getDataCallProfile(int appType, Message result) {
+    }
+
+    @Override
+    public void setCdmaBroadcastConfig(CdmaSmsBroadcastConfigInfo[] configs, Message response) {
+    }
+
+    @Override
+    public void iccIOForApp (int command, int fileid, String path, int p1, int p2, int p3,
+            String data, String pin2, String aid, Message response) {
+    }
+   
+    @Override
+    public void sendImsCdmaSms(byte[] pdu, int retry, int messageRef, Message response) {
+    }
+
+    @Override
+    public void sendImsGsmSms (String smscPDU, String pdu, int retry, int messageRef,
+            Message response) {
+    }
+
+    @Override
+    public void getIMSIForApp(String aid, Message result) {
+    }
+
+    @Override
+    public void supplyDepersonalization(String netpin, int type, Message result) {
+    }
+
+    @Override
+    public void getImsRegistrationState(Message result) {
+    }
+
+    @Override
+    public void getVoiceRadioTechnology(Message result) {
+    }
+
+    public void setupQosReq (int callId, ArrayList<String> qosFlows, Message result) {
+    }
+
+    public void releaseQos (int qosId, Message result) {
+    }
+
+    public void modifyQos (int qosId, ArrayList<String> qosFlows, Message result) {
+    }
+
+    public void suspendQos (int qosId, Message result) {
+    }
+
+    public void resumeQos (int qosId, Message result) {
+    }
+
+    public void getQosStatus (int qosId, Message result) {
     }
 }

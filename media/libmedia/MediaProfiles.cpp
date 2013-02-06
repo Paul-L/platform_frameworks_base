@@ -68,6 +68,10 @@ const MediaProfiles::NameToTagMap MediaProfiles::sCamcorderQualityNameMap[] = {
     {"720p", CAMCORDER_QUALITY_720P},
     {"1080p", CAMCORDER_QUALITY_1080P},
     {"qvga", CAMCORDER_QUALITY_QVGA},
+    {"fwvga", CAMCORDER_QUALITY_FWVGA},
+    {"wvga", CAMCORDER_QUALITY_WVGA},
+    {"vga", CAMCORDER_QUALITY_VGA},
+    {"wqvga", CAMCORDER_QUALITY_WQVGA},
 
     {"timelapselow",  CAMCORDER_QUALITY_TIME_LAPSE_LOW},
     {"timelapsehigh", CAMCORDER_QUALITY_TIME_LAPSE_HIGH},
@@ -407,9 +411,22 @@ MediaProfiles::createVideoEditorCap(const char **atts, MediaProfiles *profiles)
           !strcmp("maxOutputFrameHeight", atts[6]) &&
           !strcmp("maxPrefetchYUVFrames", atts[8]));
 
-    MediaProfiles::VideoEditorCap *pVideoEditorCap =
-        new MediaProfiles::VideoEditorCap(atoi(atts[1]), atoi(atts[3]),
-                atoi(atts[5]), atoi(atts[7]), atoi(atts[9]));
+    char mDeviceName[PROPERTY_VALUE_MAX] = {0};
+    property_get("ro.board.platform",mDeviceName,"0");
+    MediaProfiles::VideoEditorCap *pVideoEditorCap = NULL;
+    if (strncmp(mDeviceName, "msm8660" ,7) == 0)
+    {
+        /* The VideoEditor App sets the default aspect ratio to be 16:9 which
+           corresponds to FWVGA, 720P, 1080P. Hence selecting the lowest - FWVGA
+           due to memory constraints */
+        pVideoEditorCap = new MediaProfiles::VideoEditorCap(854, 480,
+                    854, 480, atoi(atts[9]));
+    }
+    else {
+        /* Selecting the value coming from media_profiles.xml which is 1080P */
+        pVideoEditorCap = new MediaProfiles::VideoEditorCap(atoi(atts[1]),
+                    atoi(atts[3]), atoi(atts[5]), atoi(atts[7]), atoi(atts[9]));
+    }
 
     logVideoEditorCap(*pVideoEditorCap);
     profiles->mVideoEditorCap = pVideoEditorCap;
@@ -620,7 +637,7 @@ MediaProfiles::getInstance()
             const char *defaultXmlFile = "/etc/media_profiles.xml";
             FILE *fp = fopen(defaultXmlFile, "r");
             if (fp == NULL) {
-                LOGW("could not find media config xml file");
+                LOGE("could not find media config xml file");
                 sInstance = createDefaultInstance();
             } else {
                 fclose(fp);  // close the file first.
@@ -633,7 +650,6 @@ MediaProfiles::getInstance()
         sInstance->checkAndAddRequiredProfilesIfNecessary();
         sIsInitialized = true;
     }
-
     return sInstance;
 }
 
@@ -641,22 +657,29 @@ MediaProfiles::getInstance()
 MediaProfiles::createDefaultH263VideoEncoderCap()
 {
     return new MediaProfiles::VideoEncoderCap(
-        VIDEO_ENCODER_H263, 192000, 420000, 176, 352, 144, 288, 1, 20);
+        VIDEO_ENCODER_H263, 192000, 6000000, 176, 800, 144, 480, 1, 30);
 }
 
 /*static*/ MediaProfiles::VideoEncoderCap*
 MediaProfiles::createDefaultM4vVideoEncoderCap()
 {
     return new MediaProfiles::VideoEncoderCap(
-        VIDEO_ENCODER_MPEG_4_SP, 192000, 420000, 176, 352, 144, 288, 1, 20);
+        VIDEO_ENCODER_MPEG_4_SP, 192000, 20 * 1000 * 1000, 176, 1920, 144, 1088, 1, 30);
 }
 
+/*static*/ MediaProfiles::VideoEncoderCap*
+MediaProfiles::createDefaultH264VideoEncoderCap()
+{
+    return new MediaProfiles::VideoEncoderCap(
+        VIDEO_ENCODER_H264, 192000, 20 * 1000 * 1000, 176, 1920, 144, 1088, 1, 30);
+}
 
 /*static*/ void
 MediaProfiles::createDefaultVideoEncoders(MediaProfiles *profiles)
 {
     profiles->mVideoEncoders.add(createDefaultH263VideoEncoderCap());
     profiles->mVideoEncoders.add(createDefaultM4vVideoEncoderCap());
+    profiles->mVideoEncoders.add(createDefaultH264VideoEncoderCap());
 }
 
 /*static*/ MediaProfiles::CamcorderProfile*
@@ -798,6 +821,7 @@ MediaProfiles::createDefaultCamcorderProfiles(MediaProfiles *profiles)
 MediaProfiles::createDefaultAudioEncoders(MediaProfiles *profiles)
 {
     profiles->mAudioEncoders.add(createDefaultAmrNBEncoderCap());
+    profiles->mAudioEncoders.add(createDefaultAacEncoderCap());
 }
 
 /*static*/ void
@@ -830,6 +854,13 @@ MediaProfiles::createDefaultAmrNBEncoderCap()
 {
     return new MediaProfiles::AudioEncoderCap(
         AUDIO_ENCODER_AMR_NB, 5525, 12200, 8000, 8000, 1, 1);
+}
+
+/*static*/ MediaProfiles::AudioEncoderCap*
+MediaProfiles::createDefaultAacEncoderCap()
+{
+    return new MediaProfiles::AudioEncoderCap(
+        AUDIO_ENCODER_AAC, 64000, 156000, 8000, 48000, 1, 2);
 }
 
 /*static*/ void

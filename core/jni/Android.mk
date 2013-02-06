@@ -82,6 +82,7 @@ LOCAL_SRC_FILES:= \
 	android_util_Binder.cpp \
 	android_util_EventLog.cpp \
 	android_util_Log.cpp \
+	android_util_jTestFramework.cpp \
 	android_util_FloatMath.cpp \
 	android_util_Process.cpp \
 	android_util_StringBlock.cpp \
@@ -155,16 +156,19 @@ LOCAL_SRC_FILES:= \
 	android_app_backup_FullBackup.cpp \
 	android_content_res_ObbScanner.cpp \
 	android_content_res_Configuration.cpp \
-  	android_animation_PropertyValuesHolder.cpp
+	android_animation_PropertyValuesHolder.cpp \
+	com_android_internal_app_ActivityTrigger.cpp \
+	org_codeaurora_Performance.cpp
 
-ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
-	LOCAL_SRC_FILES += org_codeaurora_Performance.cpp
+ifeq ($(call is-vendor-board-platform,QCOM),true)
+LOCAL_SRC_FILES += android_hardware_fm.cpp
 endif
 
 LOCAL_C_INCLUDES += \
 	$(JNI_H_INCLUDE) \
 	$(LOCAL_PATH)/android/graphics \
 	$(LOCAL_PATH)/../../libs/hwui \
+	hardware/qcom/display/libtilerenderer \
 	$(LOCAL_PATH)/../../opengl/libs \
 	$(call include-path-for, bluedroid) \
 	$(call include-path-for, libhardware)/hardware \
@@ -189,6 +193,26 @@ LOCAL_C_INCLUDES += \
 	external/zlib \
 	frameworks/opt/emoji \
 	libcore/include
+
+ifeq ($(call is-vendor-board-platform,QCOM),true)
+
+LOCAL_C_INCLUDES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
+LOCAL_ADDITIONAL_DEPENDENCIES := $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
+
+LOCAL_CFLAGS += -include bionic/libc/kernel/arch-arm/asm/posix_types.h
+LOCAL_CFLAGS += -include bionic/libc/kernel/arch-arm/asm/byteorder.h
+LOCAL_CFLAGS += -include bionic/libc/kernel/common/linux/types.h
+LOCAL_CFLAGS += -include bionic/libc/kernel/common/linux/posix_types.h
+LOCAL_CFLAGS += -include bionic/libc/kernel/common/linux/socket.h
+LOCAL_CFLAGS += -include bionic/libc/kernel/common/linux/in.h
+
+else
+
+LOCAL_CFLAGS += -DNON_QCOM_TARGET
+
+endif
+
+
 
 LOCAL_SHARED_LIBRARIES := \
 	libexpat \
@@ -222,15 +246,13 @@ LOCAL_SHARED_LIBRARIES := \
 	libharfbuzz \
 	libz \
 
-ifeq ($(USE_OPENGL_RENDERER),true)
-	LOCAL_SHARED_LIBRARIES += libhwui
+ifeq ($(TARGET_USES_TESTFRAMEWORK),true)
+	LOCAL_CFLAGS += -DCUSTOM_EVENTS_TESTFRAMEWORK
+	LOCAL_SHARED_LIBRARIES += libtestframework
 endif
 
-ifeq ($(BOARD_USES_QCOM_HARDWARE),true)
 ifeq ($(USE_OPENGL_RENDERER),true)
-LOCAL_SHARED_LIBRARIES += libtilerenderer
-endif
-LOCAL_C_INCLUDES += hardware/qcom/display/libtilerenderer
+	LOCAL_SHARED_LIBRARIES += libhwui libtilerenderer
 endif
 
 ifeq ($(BOARD_HAVE_BLUETOOTH),true)
@@ -254,11 +276,6 @@ ifeq ($(WITH_MALLOC_LEAK_CHECK),true)
 endif
 
 LOCAL_MODULE:= libandroid_runtime
-
-ifneq ($(BOARD_MOBILEDATA_INTERFACE_NAME),)
-	LOCAL_CFLAGS += -DMOBILE_IFACE_NAME='$(BOARD_MOBILEDATA_INTERFACE_NAME)'
-endif
-
 
 include $(BUILD_SHARED_LIBRARY)
 

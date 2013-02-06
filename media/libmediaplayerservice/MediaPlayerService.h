@@ -86,13 +86,20 @@ class MediaPlayerService : public BnMediaPlayerService
                 int format, int bufferCount,
                 AudioCallback cb, void *cookie);
 
+        virtual status_t        openSession(
+                int format, int sessionId, uint32_t sampleRate, int channels);
+
         virtual void            start();
         virtual ssize_t         write(const void* buffer, size_t size);
         virtual void            stop();
         virtual void            flush();
         virtual void            pause();
+        virtual void            pauseSession();
+        virtual void            resumeSession();
         virtual void            close();
+        virtual void            closeSession();
                 void            setAudioStreamType(int streamType) { mStreamType = streamType; }
+        virtual int             getAudioStreamType() { return mStreamType; }
                 void            setVolume(float left, float right);
                 status_t        setAuxEffectSendLevel(float level);
                 status_t        attachAuxEffect(int effectId);
@@ -106,6 +113,7 @@ class MediaPlayerService : public BnMediaPlayerService
                 int event, void *me, void *info);
 
         AudioTrack*             mTrack;
+        AudioTrack*             mSession;
         AudioCallback           mCallback;
         void *                  mCallbackCookie;
         int                     mStreamType;
@@ -149,6 +157,7 @@ class MediaPlayerService : public BnMediaPlayerService
         virtual void            pause() {}
         virtual void            close() {}
                 void            setAudioStreamType(int streamType) {}
+        virtual int             getAudioStreamType() { return 0; }
                 void            setVolume(float left, float right) {}
                 uint32_t        sampleRate() const { return mSampleRate; }
                 uint32_t        format() const { return (uint32_t)mFormat; }

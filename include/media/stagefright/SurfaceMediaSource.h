@@ -127,7 +127,6 @@ public:
     // modes (S.Encoder vis-a-vis SurfaceTexture)
     virtual status_t setSynchronousMode(bool enabled);
 
-#ifdef QCOM_HARDWARE
     // performQcomOperation performs Qcom specific operations. The actual
     // operation to be performed depends on the operation specified.
     //
@@ -137,7 +136,6 @@ public:
     // This method will fail if the operation is invalid or the arguments
     // specified in the operation are invalid.
     virtual status_t performQcomOperation(int operation, int arg1, int arg2, int arg3) {}
-#endif
 
     // connect attempts to connect a client API to the SurfaceMediaSource.  This
     // must be called before any other ISurfaceTexture methods are called except
@@ -373,6 +371,8 @@ private:
 
     // Avoid copying and equating and default constructor
     DISALLOW_IMPLICIT_CONSTRUCTORS(SurfaceMediaSource);
+
+    uint32_t mUsageQuirks;
 };
 
 // ----------------------------------------------------------------------------

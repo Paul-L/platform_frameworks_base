@@ -93,7 +93,7 @@ public interface TelephonyProperties
     //****** SIM Card
     /**
      * One of <code>"UNKNOWN"</code> <code>"ABSENT"</code> <code>"PIN_REQUIRED"</code>
-     * <code>"PUK_REQUIRED"</code> <code>"NETWORK_LOCKED"</code> or <code>"READY"</code>
+     * <code>"PUK_REQUIRED"</code> <code>"PERSO_LOCKED"</code> or <code>"READY"</code>
      */
     static String PROPERTY_SIM_STATE = "gsm.sim.state";
 
@@ -182,4 +182,68 @@ public interface TelephonyProperties
      * in commercial configuration.
      */
     static final String PROPERTY_TEST_CSIM = "persist.radio.test-csim";
+
+    /**
+     * Set to true to indicates support for simultaneous voice and data.
+     */
+    static final String PROPERTY_SVDATA = "ro.ril.svlte1x";
+
+    /**
+     * Indicates whether sms should be sent in synchronous manner.
+     * Type: boolean ( false = asynchronous, true = send next queued sms after
+     * making sure previous sms was sent) */
+    static final String SMS_SYNCHRONOUS_SENDING = "persist.radio.sms_sync_sending";
+
+    /**
+     * Indicates whether Out Of Service is considered as data call disconnect.
+     */
+    static final String PROPERTY_OOS_IS_DISCONNECT = "persist.telephony.oosisdc";
+
+    /**
+     * Property that shows the status of the OMH feature
+     */
+    static final String PROPERTY_OMH_ENABLED = "persist.omh.enabled";
+
+    /**
+     * Property that can be used to set the IP version for CDMA
+     */
+    static final String PROPERTY_CDMA_IPPROTOCOL = "persist.telephony.cdma.protocol";
+
+    /**
+     * Property that can be used to set the IP version for CDMA when roaming
+     */
+    static final String PROPERTY_CDMA_ROAMING_IPPROTOCOL = "persist.telephony.cdma.rproto";
+
+    /** The delay between sms sending retries */
+    static final String PROPERTY_SMS_RETRY_DELAY = "persist.radio.sms_retry_delay";
+
+    /**
+     * Property to set multi sim feature.
+     * Type: boolean ( true = multi sim feature enabled, false = multi sim disabled)
+     */
+    static final String PROPERTY_MULTI_SIM_ENABLED = "persist.dsds.enabled";
+
+    /**
+     * Property to control EONS.
+     * Type: boolean ( true = EONS enabled, false = EONS disabled)
+     */
+    static final String PROPERTY_EONS_ENABLED = "persist.eons.enabled";
+
+    /**
+     * Property to control alpha ID display for proactive commands
+     * Type: boolean ( true = alpha display enabled, false = alpha display disabled)
+     */
+    static final String PROPERTY_ALPHA_USRCNF = "persist.atel.noalpha.usrcnf";
+
+    /**
+     * Specify if following customization for CDMA Global phone registered on
+     * 3GPP technologies is enabled.
+     *
+     * - Translate MMI codes for CustomerSupport, Voice Mail, CLIP and CLIR to
+     *   the corresponding dialing numbers
+     * - Display CDMA PRL when camped on GSM
+     *
+     * Type: boolean ( true = multimode enabled, false = multimode disabled)
+     */
+    static final String PROPERTY_MULTIMODE_CDMA = "ro.config.multimode_cdma";
 }

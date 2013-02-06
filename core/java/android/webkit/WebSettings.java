@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import android.util.DisplayMetrics;
 import android.util.EventLog;
 
 import java.util.Locale;
+import android.util.Log;
 
 /**
  * Manages settings state for a WebView. When a WebView is first created, it
@@ -181,6 +183,8 @@ public class WebSettings {
     private boolean         mBlockNetworkImage = false;
     private boolean         mBlockNetworkLoads;
     private boolean         mJavaScriptEnabled = false;
+    private boolean         mAllowUniversalAccessFromFileURLs = true;
+    private boolean         mAllowFileAccessFromFileURLs = true;
     private boolean         mHardwareAccelSkia = false;
     private boolean         mShowVisualIndicator = false;
     private PluginState     mPluginState = PluginState.OFF;
@@ -207,6 +211,9 @@ public class WebSettings {
     // once. Keep track of when the path has been set.
     private boolean         mDatabasePathHasBeenSet = false;
     private String          mGeolocationDatabasePath = "";
+    // proteus: expose app private install path to the proteus framework, this
+    // will be used the root directory for installing the downloaded modules
+    private String          mDataPath = "";
     // Don't need to synchronize the get/set methods as they
     // are basic types, also none of these values are used in
     // native WebCore code.
@@ -228,6 +235,7 @@ public class WebSettings {
     private boolean         mLoadWithOverviewMode = false;
     private boolean         mEnableSmoothTransition = false;
     private boolean         mForceUserScalable = false;
+    private boolean         mWOFFEnabled = true;
 
     // AutoFill Profile data
     /**
@@ -397,6 +405,15 @@ public class WebSettings {
         mBlockNetworkLoads = mContext.checkPermission(
                 "android.permission.INTERNET", android.os.Process.myPid(),
                 android.os.Process.myUid()) != PackageManager.PERMISSION_GRANTED;
+
+        // proteus: 
+        try {
+          mDataPath = mContext.getPackageManager().getApplicationInfo(
+              mContext.getPackageName(), 0).dataDir;
+          Log.d("WebSettings", "mDataPath: " + mDataPath);
+        } catch (Exception e) {
+          Log.w("WebSettings", "Exception thrown setting mDataPath: " + e);
+        }
     }
 
     private static final String ACCEPT_LANG_FOR_US_LOCALE = "en-US";
@@ -1264,6 +1281,47 @@ public class WebSettings {
     }
 
     /**
+     * Sets whether JavaScript running in the context of a file scheme URL
+     * should be allowed to access content from any origin. This includes
+     * access to content from other file scheme URLs. See
+     * {@link #setAllowFileAccessFromFileURLs}. To enable the most restrictive,
+     * and therefore secure policy, this setting should be disabled.
+     * <p>
+     * The default value is true.
+     *
+     * @param flag whether JavaScript running in the context of a file scheme
+     *             URL should be allowed to access content from any origin
+     * @hide
+     */
+    public synchronized void setAllowUniversalAccessFromFileURLs(boolean flag) {
+        if (mAllowUniversalAccessFromFileURLs != flag) {
+            mAllowUniversalAccessFromFileURLs = flag;
+            postSync();
+        }
+    }
+
+    /**
+     * Sets whether JavaScript running in the context of a file scheme URL
+     * should be allowed to access content from other file scheme URLs. To
+     * enable the most restrictive, and therefore secure policy, this setting
+     * should be disabled. Note that the value of this setting is ignored if
+     * the value of {@link #getAllowUniversalAccessFromFileURLs} is true.
+     * <p>
+     * The default value is true.
+     *
+     * @param flag whether JavaScript running in the context of a file scheme
+     *             URL should be allowed to access content from other file
+     *             scheme URLs
+     * @hide
+     */
+    public synchronized void setAllowFileAccessFromFileURLs(boolean flag) {
+        if (mAllowFileAccessFromFileURLs != flag) {
+            mAllowFileAccessFromFileURLs = flag;
+            postSync();
+        }
+    }
+
+    /**
      * Tell the WebView to use Skia's hardware accelerated rendering path
      * @param flag True if the WebView should use Skia's hw-accel path
      * @hide
@@ -1497,6 +1555,33 @@ public class WebSettings {
      */
     public synchronized boolean getJavaScriptEnabled() {
         return mJavaScriptEnabled;
+    }
+
+    /**
+     * Gets whether JavaScript running in the context of a file scheme URL can
+     * access content from any origin. This includes access to content from
+     * other file scheme URLs.
+     *
+     * @return whether JavaScript running in the context of a file scheme URL
+     *         can access content from any origin
+     * @see #setAllowUniversalAccessFromFileURLs
+     * @hide
+     */
+    public synchronized boolean getAllowUniversalAccessFromFileURLs() {
+        return mAllowUniversalAccessFromFileURLs;
+    }
+
+    /**
+     * Gets whether JavaScript running in the context of a file scheme URL can
+     * access content from other file scheme URLs.
+     *
+     * @return whether JavaScript running in the context of a file scheme URL
+     *         can access content from other file scheme URLs
+     * @see #setAllowFileAccessFromFileURLs
+     * @hide
+     */
+    public synchronized boolean getAllowFileAccessFromFileURLs() {
+        return mAllowFileAccessFromFileURLs;
     }
 
     /**
@@ -1808,6 +1893,16 @@ public class WebSettings {
      */
     public synchronized AutoFillProfile getAutoFillProfile() {
         return mAutoFillProfile;
+    }
+
+    /**
+     * @hide
+     */
+    public synchronized void setWOFFEnabled(boolean flag) {
+        if (mWOFFEnabled != flag) {
+            mWOFFEnabled = flag;
+            postSync();
+        }
     }
 
     int getDoubleTapToastCount() {

@@ -28,7 +28,7 @@ import android.util.Log;
 public class SignalStrength implements Parcelable {
 
     private static final String LOG_TAG = "SignalStrength";
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
 
     /** @hide */
     public static final int SIGNAL_STRENGTH_NONE_OR_UNKNOWN = 0;
@@ -64,7 +64,7 @@ public class SignalStrength implements Parcelable {
     private int mLteCqi;
 
     private boolean isGsm; // This value is set by the ServiceStateTracker onSignalStrengthResult
-
+    private static int INVALID = 0x7FFFFFFF;
     /**
      * Create a new SignalStrength from a intent notifier Bundle
      *
@@ -96,11 +96,11 @@ public class SignalStrength implements Parcelable {
         mEvdoDbm = -1;
         mEvdoEcio = -1;
         mEvdoSnr = -1;
-        mLteSignalStrength = -1;
-        mLteRsrp = -1;
-        mLteRsrq = -1;
-        mLteRssnr = INVALID_SNR;
-        mLteCqi = -1;
+        mLteSignalStrength = 99;
+        mLteRsrp = INVALID;
+        mLteRsrq = INVALID;
+        mLteRssnr = INVALID;
+        mLteCqi = INVALID;
         isGsm = true;
     }
 
@@ -138,9 +138,8 @@ public class SignalStrength implements Parcelable {
             int cdmaDbm, int cdmaEcio,
             int evdoDbm, int evdoEcio, int evdoSnr,
             boolean gsm) {
-        this(gsmSignalStrength, gsmBitErrorRate, cdmaDbm, cdmaEcio,
-                evdoDbm, evdoEcio, evdoSnr, -1, -1,
-                -1, INVALID_SNR, -1, gsm);
+         this(gsmSignalStrength, gsmBitErrorRate, cdmaDbm, cdmaEcio, evdoDbm, evdoEcio, evdoSnr, 99,
+                INVALID, INVALID, INVALID, INVALID, gsm);
     }
 
     /**
@@ -195,6 +194,31 @@ public class SignalStrength implements Parcelable {
     }
 
     /**
+     * Construct a SignalStrength object from the given parcel.
+     * gsm flag does not come from RIL.
+     * validate the input if validate flag is set
+     *
+     * @hide
+     */
+    public SignalStrength(Parcel in, boolean validate) {
+        mGsmSignalStrength = in.readInt();
+        mGsmBitErrorRate = in.readInt();
+        mCdmaDbm = in.readInt();
+        mCdmaEcio = in.readInt();
+        mEvdoDbm = in.readInt();
+        mEvdoEcio = in.readInt();
+        mEvdoSnr = in.readInt();
+        mLteSignalStrength = in.readInt();
+        mLteRsrp = in.readInt();
+        mLteRsrq = in.readInt();
+        mLteRssnr = in.readInt();
+        mLteCqi = in.readInt();
+
+        if (validate == true )
+            validateInput();
+    }
+
+    /**
      * {@link Parcelable#writeToParcel}
      */
     public void writeToParcel(Parcel out, int flags) {
@@ -235,6 +259,37 @@ public class SignalStrength implements Parcelable {
         }
     };
 
+    private void validateInput() {
+        // cdma, evdo, lte values need to be sign converted from ril to telephony
+        // perform range check for all values
+        if (DBG) log("SignalStrength before validate=" + this);
+        mGsmSignalStrength = mGsmSignalStrength >= 0 ? mGsmSignalStrength : 99;
+        // BER no change;
+
+        mCdmaDbm = mCdmaDbm > 0 ? -mCdmaDbm : -120;
+        mCdmaEcio = (mCdmaEcio > 0) ? -mCdmaEcio : -160;
+
+        mEvdoDbm = (mEvdoDbm > 0) ? -mEvdoDbm : -120;
+        mEvdoEcio = (mEvdoEcio > 0) ? -mEvdoEcio : -1;
+        mEvdoSnr = ((mEvdoSnr > 0) && (mEvdoSnr <= 8)) ? mEvdoSnr : -1;
+
+        mLteSignalStrength = (mLteSignalStrength >= 0) ? mLteSignalStrength : 99;
+        mLteRsrp = ((mLteRsrp >= 44) && (mLteRsrp <= 140)) ? -mLteRsrp : SignalStrength.INVALID;
+        mLteRsrq = ((mLteRsrq >= 3) && (mLteRsrq <= 20)) ? -mLteRsrq : SignalStrength.INVALID;
+        mLteRssnr = ((mLteRssnr >= -200) && (mLteRssnr <= 300)) ? mLteRssnr : SignalStrength.INVALID;
+        if (DBG) log("SignalStrength after validate=" + this);
+        // Cqi  no change
+    }
+
+    /**
+     * @param true - Gsm, Lte
+     *        false - Cdma
+     *
+     * @hide
+     */
+    public void setGsm(boolean gsmFlag) {
+      isGsm = gsmFlag;
+    }
     /**
      * Get the GSM Signal Strength, valid values are (0-31, 99) as defined in TS 27.007 8.5
      */
@@ -293,25 +348,19 @@ public class SignalStrength implements Parcelable {
         int level;
 
         if (isGsm) {
-            // TODO Need solve the discrepancy of invalid values between
-            // RIL_LTE_SignalStrength and here.
-            if ((mLteSignalStrength == -1)
-                    && (mLteRsrp == -1)
-                    && (mLteRsrq == -1)
-                    && (mLteCqi == -1)) {
+            level = getLteLevel();
+            if (level == SIGNAL_STRENGTH_NONE_OR_UNKNOWN) {
                 level = getGsmLevel();
-            } else {
-                level = getLteLevel();
             }
         } else {
             int cdmaLevel = getCdmaLevel();
             int evdoLevel = getEvdoLevel();
             if (evdoLevel == SIGNAL_STRENGTH_NONE_OR_UNKNOWN) {
                 /* We don't know evdo, use cdma */
-                level = getCdmaLevel();
+                level = cdmaLevel;
             } else if (cdmaLevel == SIGNAL_STRENGTH_NONE_OR_UNKNOWN) {
                 /* We don't know cdma, use evdo */
-                level = getEvdoLevel();
+                level = evdoLevel;
             } else {
                 /* We know both, use the lowest level */
                 level = cdmaLevel < evdoLevel ? cdmaLevel : evdoLevel;
@@ -329,10 +378,7 @@ public class SignalStrength implements Parcelable {
     public int getAsuLevel() {
         int asuLevel;
         if (isGsm) {
-            if ((mLteSignalStrength == -1)
-                    && (mLteRsrp == -1)
-                    && (mLteRsrq == -1)
-                    && (mLteCqi == -1)) {
+            if (getLteLevel() == SIGNAL_STRENGTH_NONE_OR_UNKNOWN) {
                 asuLevel = getGsmAsuLevel();
             } else {
                 asuLevel = getLteAsuLevel();
@@ -364,10 +410,7 @@ public class SignalStrength implements Parcelable {
         int dBm;
 
         if(isGsm()) {
-            if ((mLteSignalStrength == -1)
-                    && (mLteRsrp == -1)
-                    && (mLteRsrq == -1)
-                    && (mLteCqi == -1)) {
+            if (getLteLevel() == SIGNAL_STRENGTH_NONE_OR_UNKNOWN) {
                 dBm = getGsmDbm();
             } else {
                 dBm = getLteDbm();
@@ -568,45 +611,85 @@ public class SignalStrength implements Parcelable {
      * @hide
      */
     public int getLteLevel() {
-        int levelLteRsrp = 0;
-        int levelLteRssnr = 0;
+        /*
+         * TS 36.214 Physical Layer Section 5.1.3 TS 36.331 RRC RSSI = received
+         * signal + noise RSRP = reference signal dBm RSRQ = quality of signal
+         * dB= Number of Resource blocksxRSRP/RSSI SNR = gain=signal/noise ratio
+         * = -10log P1/P2 dB
+         */
+        int rssiIconLevel = SIGNAL_STRENGTH_NONE_OR_UNKNOWN, rsrpIconLevel = -1, snrIconLevel = -1;
 
-        if (mLteRsrp == -1) levelLteRsrp = 0;
-        else if (mLteRsrp >= -95) levelLteRsrp = SIGNAL_STRENGTH_GREAT;
-        else if (mLteRsrp >= -105) levelLteRsrp = SIGNAL_STRENGTH_GOOD;
-        else if (mLteRsrp >= -115) levelLteRsrp = SIGNAL_STRENGTH_MODERATE;
-        else levelLteRsrp = SIGNAL_STRENGTH_POOR;
+        if (mLteRsrp > -44) rsrpIconLevel = -1;
+        else if (mLteRsrp >= -85) rsrpIconLevel = SIGNAL_STRENGTH_GREAT;
+        else if (mLteRsrp >= -95) rsrpIconLevel = SIGNAL_STRENGTH_GOOD;
+        else if (mLteRsrp >= -105) rsrpIconLevel = SIGNAL_STRENGTH_MODERATE;
+        else if (mLteRsrp >= -115) rsrpIconLevel = SIGNAL_STRENGTH_POOR;
+        else if (mLteRsrp >= -140) rsrpIconLevel = SIGNAL_STRENGTH_NONE_OR_UNKNOWN;
 
-        if (mLteRssnr == INVALID_SNR) levelLteRssnr = 0;
-        else if (mLteRssnr >= 45) levelLteRssnr = SIGNAL_STRENGTH_GREAT;
-        else if (mLteRssnr >= 10) levelLteRssnr = SIGNAL_STRENGTH_GOOD;
-        else if (mLteRssnr >= -30) levelLteRssnr = SIGNAL_STRENGTH_MODERATE;
-        else levelLteRssnr = SIGNAL_STRENGTH_POOR;
+        /*
+         * Values are -200 dB to +300 (SNR*10dB) RS_SNR >= 13.0 dB =>4 bars 4.5
+         * dB <= RS_SNR < 13.0 dB => 3 bars 1.0 dB <= RS_SNR < 4.5 dB => 2 bars
+         * -3.0 dB <= RS_SNR < 1.0 dB 1 bar RS_SNR < -3.0 dB/No Service Antenna
+         * Icon Only
+         */
+        if (mLteRssnr > 300) snrIconLevel = -1;
+        else if (mLteRssnr >= 130) snrIconLevel = SIGNAL_STRENGTH_GREAT;
+        else if (mLteRssnr >= 45) snrIconLevel = SIGNAL_STRENGTH_GOOD;
+        else if (mLteRssnr >= 10) snrIconLevel = SIGNAL_STRENGTH_MODERATE;
+        else if (mLteRssnr >= -30) snrIconLevel = SIGNAL_STRENGTH_POOR;
+        else if (mLteRssnr >= -200)
+            snrIconLevel = SIGNAL_STRENGTH_NONE_OR_UNKNOWN;
 
-        int level;
-        if (mLteRsrp == -1)
-            level = levelLteRssnr;
-        else if (mLteRssnr == INVALID_SNR)
-            level = levelLteRsrp;
-        else
-            level = (levelLteRssnr < levelLteRsrp) ? levelLteRssnr : levelLteRsrp;
+        if (DBG) log("getLTELevel - rsrp:" + mLteRsrp + " snr:" + mLteRssnr + " rsrpIconLevel:"
+                + rsrpIconLevel + " snrIconLevel:" + snrIconLevel);
 
-        if (DBG) log("Lte rsrp level: "+levelLteRsrp
-                + " snr level: " + levelLteRssnr + " level: " + level);
-        return level;
+        /* Choose a measurement type to use for notification */
+        if (snrIconLevel != -1 && rsrpIconLevel != -1) {
+            /*
+             * The number of bars displayed shall be the smaller of the bars
+             * associated with LTE RSRP and the bars associated with the LTE
+             * RS_SNR
+             */
+            return (rsrpIconLevel < snrIconLevel ? rsrpIconLevel : snrIconLevel);
+        }
+
+        if (snrIconLevel != -1) return snrIconLevel;
+
+        if (rsrpIconLevel != -1) return rsrpIconLevel;
+
+        /* Valid values are (0-63, 99) as defined in TS 36.331 */
+        if (mLteSignalStrength > 63) rssiIconLevel = SIGNAL_STRENGTH_NONE_OR_UNKNOWN;
+        else if (mLteSignalStrength >= 12) rssiIconLevel = SIGNAL_STRENGTH_GREAT;
+        else if (mLteSignalStrength >= 8) rssiIconLevel = SIGNAL_STRENGTH_GOOD;
+        else if (mLteSignalStrength >= 5) rssiIconLevel = SIGNAL_STRENGTH_MODERATE;
+        else if (mLteSignalStrength >= 0) rssiIconLevel = SIGNAL_STRENGTH_POOR;
+        if (DBG) log("getLTELevel - rssi:" + mLteSignalStrength + " rssiIconLevel:"
+                + rssiIconLevel);
+        return rssiIconLevel;
+
     }
-
     /**
-     * Get the LTE signal level as an asu value between 0..97, 99 is unknown
-     * Asu is calculated based on 3GPP RSRP. Refer to 3GPP 27.007 (Ver 10.3.0) Sec 8.69
-     *
+     * Get the LTE signal level as an asu value.
+     * Asu is calculated based on 3GPP RSRP.
      * @hide
      */
     public int getLteAsuLevel() {
         int lteAsuLevel = 99;
         int lteDbm = getLteDbm();
-        if (lteDbm <= -140) lteAsuLevel = 0;
-        else if (lteDbm >= -43) lteAsuLevel = 97;
+        /*
+         * 3GPP 27.007 (Ver 10.3.0) Sec 8.69
+         * 0   -140 dBm or less
+         * 1   -139 dBm
+         * 2...96  -138... -44 dBm
+         * 97  -43 dBm or greater
+         * 255 not known or not detectable
+         */
+        /*
+         * validateInput will always give a valid range between -140 t0 -44 as
+         * per ril.h. so RSRP >= -43 & <-140 will fall under asu level 255
+         * and not 97 or 0
+         */
+        if (lteDbm == SignalStrength.INVALID) lteAsuLevel = 255;
         else lteAsuLevel = lteDbm + 140;
         if (DBG) log("Lte Asu level: "+lteAsuLevel);
         return lteAsuLevel;

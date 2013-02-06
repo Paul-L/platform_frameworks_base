@@ -18,7 +18,6 @@
 #include <arpa/inet.h>
 
 #include <media/stagefright/Utils.h>
-#ifdef QCOM_HARDWARE
 #include <media/stagefright/MediaDebug.h>
 #define NIDEBUG 0
 #include <utils/Log.h>
@@ -139,7 +138,6 @@ namespace {
       return -static_cast < int32_t > (x >> 1);
   }
 }
-#endif
 
 namespace android {
 
@@ -176,7 +174,7 @@ uint64_t hton64(uint64_t x) {
     return ((uint64_t)htonl(x & 0xffffffff) << 32) | htonl(x >> 32);
 }
 
-#ifdef QCOM_HARDWARE
+
 status_t
 parseSps (uint16_t naluSize, const uint8_t *encodedBytes, SpsInfo * info) {
 
@@ -294,7 +292,6 @@ parseSps (uint16_t naluSize, const uint8_t *encodedBytes, SpsInfo * info) {
       LOGV("mInterlaced = 0x%x", info->mInterlaced );
       return OK;
 }
-#endif
 
 }  // namespace android
 

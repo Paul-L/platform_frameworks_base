@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +55,7 @@ import com.android.server.net.NetworkStatsService;
 import com.android.server.pm.PackageManagerService;
 import com.android.server.usb.UsbService;
 import com.android.server.wm.WindowManagerService;
+import com.android.internal.atfwd.AtCmdFwdService;
 
 import dalvik.system.VMRuntime;
 import dalvik.system.Zygote;
@@ -111,6 +113,7 @@ class ServerThread extends Thread {
 
         LightsService lights = null;
         PowerManagerService power = null;
+        DynamicMemoryManagerService dmm = null;
         BatteryService battery = null;
         AlarmManagerService alarm = null;
         NetworkManagementService networkManagement = null;
@@ -130,6 +133,7 @@ class ServerThread extends Thread {
         RecognitionManagerService recognition = null;
         ThrottleService throttle = null;
         NetworkTimeUpdateService networkTimeUpdater = null;
+        CpuGovernorService cpuGovernorManager = null;
 
         // Critical services...
         try {
@@ -143,8 +147,14 @@ class ServerThread extends Thread {
             Slog.i(TAG, "Activity Manager");
             context = ActivityManagerService.main(factoryTest);
 
-            Slog.i(TAG, "Telephony Registry");
-            ServiceManager.addService("telephony.registry", new TelephonyRegistry(context));
+            if (android.telephony.TelephonyManager.getDefault().isMultiSimEnabled()) {
+                Slog.i(TAG, "MSimTelephony Registry");
+                ServiceManager.addService("telephony.msim.registry",
+                        new MSimTelephonyRegistry(context));
+            } else {
+                Slog.i(TAG, "Telephony Registry");
+                ServiceManager.addService("telephony.registry", new TelephonyRegistry(context));
+            }
 
             AttributeCache.init(context);
 
@@ -182,9 +192,11 @@ class ServerThread extends Thread {
                 Slog.e(TAG, "Failure starting Account Manager", e);
             }
 
+
             Slog.i(TAG, "Content Manager");
             ContentService.main(context,
                     factoryTest == SystemServer.FACTORY_TEST_LOW_LEVEL);
+
 
             Slog.i(TAG, "System Content Providers");
             ActivityManagerService.installSystemProviders();
@@ -245,6 +257,14 @@ class ServerThread extends Thread {
                 }
             }
 
+            Slog.i(TAG, "DynamicMemoryManager Service");
+            dmm = new DynamicMemoryManagerService(context);
+
+            cpuGovernorManager = new CpuGovernorService(context);
+
+            if (cpuGovernorManager == null) {
+                Slog.e(TAG, "CpuGovernorService failed to start");
+            }
         } catch (RuntimeException e) {
             Slog.e("System", "******************************************");
             Slog.e("System", "************ Failure starting core service", e);
@@ -383,6 +403,7 @@ class ServerThread extends Thread {
                 networkPolicy.bindConnectivityManager(connectivity);
                 wifi.checkAndStartWifi();
                 wifiP2p.connectivityServiceReady();
+                connectivity.startCne();
             } catch (Throwable e) {
                 reportWtf("starting Connectivity Service", e);
             }
@@ -414,6 +435,13 @@ class ServerThread extends Thread {
                 networkPolicy.bindNotificationManager(notification);
             } catch (Throwable e) {
                 reportWtf("starting Notification Manager", e);
+            }
+
+            try {
+                Slog.i(TAG, "HDMI Service");
+                ServiceManager.addService("hdmi", new HDMIService(context));
+            } catch (Throwable e) {
+                Slog.e(TAG, "Failure starting HDMI Service ", e);
             }
 
             try {
@@ -532,6 +560,14 @@ class ServerThread extends Thread {
                 ServiceManager.addService("diskstats", new DiskStatsService(context));
             } catch (Throwable e) {
                 reportWtf("starting DiskStats Service", e);
+            }
+
+            try {
+                Slog.i(TAG, "AtCmdFwd Service");
+                AtCmdFwdService atfwd = new AtCmdFwdService(context);
+                ServiceManager.addService("AtCmdFwd", atfwd);
+            } catch (Throwable e) {
+                reportWtf("starting AtCmdFwd Service", e);
             }
 
             try {

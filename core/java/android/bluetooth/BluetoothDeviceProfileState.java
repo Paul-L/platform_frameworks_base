@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,11 +28,13 @@ import android.server.BluetoothA2dpService;
 import android.server.BluetoothService;
 import android.util.Log;
 import android.util.Pair;
+import android.os.ParcelUuid;
 
 import com.android.internal.util.State;
 import com.android.internal.util.StateMachine;
 
 import java.util.Set;
+import java.util.List;
 
 /**
  * This class is the Profile connection state machine associated with a remote
@@ -85,12 +88,14 @@ public final class BluetoothDeviceProfileState extends StateMachine {
     public static final int CONNECT_OTHER_PROFILES = 103;
     private static final int CONNECTION_ACCESS_REQUEST_REPLY = 104;
     private static final int CONNECTION_ACCESS_REQUEST_EXPIRY = 105;
+    private static final int UNPAIR_COMPLETE = 106;
 
     public static final int CONNECT_OTHER_PROFILES_DELAY = 4000; // 4 secs
     private static final int CONNECTION_ACCESS_REQUEST_EXPIRY_TIMEOUT = 7000; // 7 secs
     private static final int CONNECTION_ACCESS_UNDEFINED = -1;
     private static final long INIT_INCOMING_REJECT_TIMER = 1000; // 1 sec
     private static final long MAX_INCOMING_REJECT_TIMER = 3600 * 1000 * 4; // 4 hours
+    private static final int UNPAIR_COMPLETE_DELAY = 2000; // 2 secs delay in bluez
 
     private static final String ACCESS_AUTHORITY_PACKAGE = "com.android.settings";
     private static final String ACCESS_AUTHORITY_CLASS =
@@ -124,6 +129,9 @@ public final class BluetoothDeviceProfileState extends StateMachine {
     private PowerManager.WakeLock mWakeLock;
     private PowerManager mPowerManager;
     private boolean mPairingRequestRcvd = false;
+    private boolean mExpectingSdpComplete = false;
+
+    private boolean mUnpairStarted = false;
 
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
@@ -201,7 +209,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     mPairingRequestRcvd = false;
                 } else if (state == BluetoothDevice.BOND_NONE) {
                     mPairingRequestRcvd = false;
+                } else if (state == BluetoothDevice.BOND_BONDED) {
+                    mExpectingSdpComplete = true;
                 }
+            } else if (action.equals(BluetoothDevice.ACTION_UUID)) {
+                 mExpectingSdpComplete = false;
             }
         }
     };
@@ -223,7 +235,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
 
     public BluetoothDeviceProfileState(Context context, String address,
           BluetoothService service, BluetoothA2dpService a2dpService, boolean setTrust) {
-        super(address);
+        super("BDP:" + address);
         mContext = context;
         mDevice = new BluetoothDevice(address);
         mService = service;
@@ -248,6 +260,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
         filter.addAction(BluetoothDevice.ACTION_CONNECTION_ACCESS_REPLY);
         filter.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
         filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_UUID);
 
         mContext.registerReceiver(mBroadcastReceiver, filter);
 
@@ -317,30 +330,60 @@ public final class BluetoothDeviceProfileState extends StateMachine {
             log("ACL Connected State -> Processing Message: " + message.what);
             switch(message.what) {
                 case CONNECT_HFP_OUTGOING:
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mOutgoingHandsfree);
+                    }
+                    break;
                 case DISCONNECT_HFP_OUTGOING:
                     transitionTo(mOutgoingHandsfree);
                     break;
                 case CONNECT_HFP_INCOMING:
-                    transitionTo(mIncomingHandsfree);
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mIncomingHandsfree);
+                    }
                     break;
                 case DISCONNECT_HFP_INCOMING:
                     transitionTo(mIncomingHandsfree);
                     break;
                 case CONNECT_A2DP_OUTGOING:
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mOutgoingA2dp);
+                    }
+                    break;
                 case DISCONNECT_A2DP_OUTGOING:
                     transitionTo(mOutgoingA2dp);
                     break;
                 case CONNECT_A2DP_INCOMING:
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mIncomingA2dp);
+                    }
+                    break;
                 case DISCONNECT_A2DP_INCOMING:
                     transitionTo(mIncomingA2dp);
                     break;
                 case CONNECT_HID_OUTGOING:
                 case DISCONNECT_HID_OUTGOING:
-                    transitionTo(mOutgoingHid);
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mOutgoingHid);
+                    }
                     break;
                 case CONNECT_HID_INCOMING:
                 case DISCONNECT_HID_INCOMING:
-                    transitionTo(mIncomingHid);
+                    if (mUnpairStarted == true) {
+                        log("Discarding message " + message.what);
+                    } else {
+                        transitionTo(mIncomingHid);
+                    }
                     break;
                 case DISCONNECT_PBAP_OUTGOING:
                     processCommand(DISCONNECT_PBAP_OUTGOING);
@@ -369,6 +412,9 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     } else {
                         if (mHeadsetService == null) {
                               mAutoConnectionPending = true;
+                              log("AUTO_CONNECT Waiting for HeadsetSerive bind " +
+                                    mDevice.getAddress());
+                              break;
                         } else if (mHeadsetService.getPriority(mDevice) ==
                               BluetoothHeadset.PRIORITY_AUTO_CONNECT &&
                               mHeadsetService.getDevicesMatchingConnectionStates(
@@ -398,7 +444,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     }
                     if (message.arg1 == CONNECT_A2DP_OUTGOING) {
                         if (mA2dpService != null &&
-                            mA2dpService.getConnectedDevices().size() == 0) {
+                            (mA2dpService.getPriority(mDevice) >
+                             BluetoothProfile.PRIORITY_OFF) &&
+                            mA2dpService.getDevicesMatchingConnectionStates(
+                                new int[] {BluetoothProfile.STATE_CONNECTED,
+                                           BluetoothProfile.STATE_CONNECTING}).size() ==0) {
                             Log.i(TAG, "A2dp:Connect Other Profiles");
                             mA2dpService.connect(mDevice);
                         }
@@ -406,7 +456,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                         if (mHeadsetService == null) {
                             deferMessage(message);
                         } else {
-                            if (mHeadsetService.getConnectedDevices().size() == 0) {
+                            if ((mHeadsetService.getPriority(mDevice) >
+                                 BluetoothProfile.PRIORITY_OFF) &&
+                                 mHeadsetService.getDevicesMatchingConnectionStates(
+                                    new int[] {BluetoothProfile.STATE_CONNECTED,
+                                               BluetoothProfile.STATE_CONNECTING}).size() ==0) {
                                 Log.i(TAG, "Headset:Connect Other Profiles");
                                 mHeadsetService.connect(mDevice);
                             }
@@ -416,31 +470,35 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                 case TRANSITION_TO_STABLE:
                     // ignore.
                     break;
-                case SM_QUIT_CMD:
-                    mContext.unregisterReceiver(mBroadcastReceiver);
-                    mBroadcastReceiver = null;
-                    mAdapter.closeProfileProxy(BluetoothProfile.HEADSET, mHeadsetService);
-                    mBluetoothProfileServiceListener = null;
-                    mOutgoingHandsfree = null;
-                    mPbap = null;
-                    mPbapService.close();
-                    mPbapService = null;
-                    mIncomingHid = null;
-                    mOutgoingHid = null;
-                    mIncomingHandsfree = null;
-                    mOutgoingHandsfree = null;
-                    mIncomingA2dp = null;
-                    mOutgoingA2dp = null;
-                    mBondedDevice = null;
-                    // There is a problem in the State Machine code
-                    // where things are not cleaned up properly, when quit message
-                    // is handled so return NOT_HANDLED as a workaround.
-                    return NOT_HANDLED;
+                case UNPAIR_COMPLETE:
+                    processCommand(UNPAIR_COMPLETE);
+                    break;
                 default:
                     return NOT_HANDLED;
             }
             return HANDLED;
         }
+    }
+
+    @Override
+    protected void quitting() {
+        mContext.unregisterReceiver(mBroadcastReceiver);
+        mBroadcastReceiver = null;
+        mAdapter.closeProfileProxy(BluetoothProfile.HEADSET, mHeadsetService);
+        mBluetoothProfileServiceListener = null;
+        mOutgoingHandsfree = null;
+        mPbap = null;
+        mPbapService.close();
+        mPbapService = null;
+        mIncomingHid = null;
+        mOutgoingHid = null;
+        mIncomingHandsfree = null;
+        mOutgoingHandsfree = null;
+        mIncomingA2dp = null;
+        mOutgoingA2dp = null;
+        mBondedDevice = null;
+
+        super.quitting();
     }
 
     private class OutgoingHandsfree extends State {
@@ -542,6 +600,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     break; // ignore
                 case DISCONNECT_PBAP_OUTGOING:
                 case UNPAIR:
+                case UNPAIR_COMPLETE:
                 case AUTO_CONNECT_PROFILES:
                 case CONNECT_OTHER_PROFILES:
                     deferMessage(message);
@@ -640,6 +699,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                      break; // ignore
                 case DISCONNECT_PBAP_OUTGOING:
                 case UNPAIR:
+                case UNPAIR_COMPLETE:
                 case AUTO_CONNECT_PROFILES:
                 case CONNECT_OTHER_PROFILES:
                     deferMessage(message);
@@ -750,6 +810,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     break; // ignore
                 case DISCONNECT_PBAP_OUTGOING:
                 case UNPAIR:
+                case UNPAIR_COMPLETE:
                 case AUTO_CONNECT_PROFILES:
                 case CONNECT_OTHER_PROFILES:
                     deferMessage(message);
@@ -846,6 +907,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                      break; // ignore
                 case DISCONNECT_PBAP_OUTGOING:
                 case UNPAIR:
+                case UNPAIR_COMPLETE:
                 case AUTO_CONNECT_PROFILES:
                 case CONNECT_OTHER_PROFILES:
                     deferMessage(message);
@@ -1059,7 +1121,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     ret =  mHeadsetService.acceptIncomingConnect(mDevice);
                 } else if (mHeadsetState == BluetoothHeadset.STATE_DISCONNECTED) {
                     writeTimerValue(0);
-                    handleConnectionOfOtherProfiles(command);
+                    if(!mAdapter.isHostPatchRequired(mDevice,
+                         BluetoothAdapter.HOST_PATCH_AVOID_AUTO_CONNECT)) {
+                         Log.d(TAG, "Avoid Connecting Other Profiles Incoming HFP");
+                         handleConnectionOfOtherProfiles(command);
+                    }
                     ret = mHeadsetService.createIncomingConnect(mDevice);
                 }
                 break;
@@ -1071,7 +1137,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                 } else {
                     writeTimerValue(0);
                     ret = mA2dpService.allowIncomingConnect(mDevice, true);
-                    handleConnectionOfOtherProfiles(command);
+                    if(!mAdapter.isHostPatchRequired(mDevice,
+                         BluetoothAdapter.HOST_PATCH_AVOID_AUTO_CONNECT)) {
+                         Log.d(TAG, "Avoid Connecting Other Profiles Incoming A2DP");
+                         handleConnectionOfOtherProfiles(command);
+                    }
                 }
                 break;
             case CONNECT_HID_INCOMING:
@@ -1176,6 +1246,7 @@ public final class BluetoothDeviceProfileState extends StateMachine {
 
     synchronized boolean processCommand(int command) {
         log("Processing command:" + command);
+        ParcelUuid[] uuids = null;
         switch(command) {
             case  CONNECT_HFP_OUTGOING:
                 if (mHeadsetService == null) {
@@ -1188,6 +1259,11 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                 if (mHeadsetService == null) {
                     deferProfileServiceMessage(command);
                 } else {
+                    uuids = mDevice.getUuids();
+                    if (!BluetoothUuid.isUuidPresent(uuids, BluetoothUuid.HSP) &&
+                        !BluetoothUuid.isUuidPresent(uuids, BluetoothUuid.Handsfree)) {
+                        mDevice.fetchUuidsWithSdp();
+                    }
                     processIncomingConnectCommand(command);
                     return true;
                 }
@@ -1198,11 +1274,19 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                 }
                 break;
             case CONNECT_A2DP_INCOMING:
+                uuids = mDevice.getUuids();
+                if (!BluetoothUuid.isUuidPresent(uuids,  BluetoothUuid.AudioSink)) {
+                    mDevice.fetchUuidsWithSdp();
+                }
                 processIncomingConnectCommand(command);
                 return true;
             case CONNECT_HID_OUTGOING:
                 return mService.connectInputDeviceInternal(mDevice);
             case CONNECT_HID_INCOMING:
+                uuids = mDevice.getUuids();
+                if (!BluetoothUuid.isUuidPresent(uuids, BluetoothUuid.Hid)) {
+                    mDevice.fetchUuidsWithSdp();
+                }
                 processIncomingConnectCommand(command);
                 return true;
             case DISCONNECT_HFP_OUTGOING:
@@ -1214,8 +1298,10 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     Message m = new Message();
                     m.what = DISCONNECT_PBAP_OUTGOING;
                     deferMessage(m);
-                    if (mHeadsetService.getPriority(mDevice) ==
-                        BluetoothHeadset.PRIORITY_AUTO_CONNECT) {
+                    int bluetoothState = mService.getBluetoothState();
+                    if ((mHeadsetService.getPriority(mDevice) ==
+                        BluetoothHeadset.PRIORITY_AUTO_CONNECT) &&
+                        (bluetoothState != BluetoothAdapter.STATE_TURNING_OFF)) {
                         mHeadsetService.setPriority(mDevice, BluetoothHeadset.PRIORITY_ON);
                     }
                     return mHeadsetService.disconnectHeadsetInternal(mDevice);
@@ -1255,7 +1341,15 @@ public final class BluetoothDeviceProfileState extends StateMachine {
             case UNPAIR:
                 writeTimerValue(INIT_INCOMING_REJECT_TIMER);
                 setTrust(CONNECTION_ACCESS_UNDEFINED);
+                Message msg = obtainMessage(UNPAIR_COMPLETE);
+                sendMessageDelayed(msg, UNPAIR_COMPLETE_DELAY);
+                mUnpairStarted = true;
                 return mService.removeBondInternal(mDevice.getAddress());
+            case UNPAIR_COMPLETE:
+                // unpair process in bluez will get triggered, unblocking
+                // UI requests
+                mUnpairStarted = false;
+                break;
             default:
                 Log.e(TAG, "Error: Unknown Command");
         }
@@ -1311,6 +1405,19 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                 if (mA2dpService.getPriority(mDevice) == BluetoothProfile.PRIORITY_ON ||
                         mA2dpService.getPriority(mDevice) ==
                             BluetoothProfile.PRIORITY_AUTO_CONNECT) {
+                    List<BluetoothDevice> sinks =
+                        mA2dpService.getDevicesMatchingConnectionStates(
+                                new int[] {BluetoothProfile.STATE_CONNECTED,
+                                           BluetoothProfile.STATE_CONNECTING});
+
+                    if (sinks.contains(mDevice)) {
+                        return; // Already profile connection in progress
+                    }
+                    Message msg = new Message();
+                    msg.what = CONNECT_OTHER_PROFILES;
+                    msg.arg1 = CONNECT_A2DP_OUTGOING;
+                    sendMessageDelayed(msg, CONNECT_OTHER_PROFILES_DELAY);
+                } else if (mExpectingSdpComplete) {
                     Message msg = new Message();
                     msg.what = CONNECT_OTHER_PROFILES;
                     msg.arg1 = CONNECT_A2DP_OUTGOING;
@@ -1325,6 +1432,20 @@ public final class BluetoothDeviceProfileState extends StateMachine {
                     (mHeadsetService.getPriority(mDevice) == BluetoothProfile.PRIORITY_ON ||
                         mHeadsetService.getPriority(mDevice) ==
                             BluetoothProfile.PRIORITY_AUTO_CONNECT)) {
+                    List<BluetoothDevice> headsets =
+                        mHeadsetService.getDevicesMatchingConnectionStates(
+                                new int[] {BluetoothProfile.STATE_CONNECTED,
+                                           BluetoothProfile.STATE_CONNECTING});
+
+                    if (headsets.contains(mDevice)) {
+                        return; // Already profile connection in progress
+                    }
+                    Message msg = new Message();
+                    msg.what = CONNECT_OTHER_PROFILES;
+                    msg.arg1 = CONNECT_HFP_OUTGOING;
+                    sendMessageDelayed(msg, CONNECT_OTHER_PROFILES_DELAY);
+                } else if (mHeadsetService != null &&
+                           mExpectingSdpComplete) {
                     Message msg = new Message();
                     msg.what = CONNECT_OTHER_PROFILES;
                     msg.arg1 = CONNECT_HFP_OUTGOING;

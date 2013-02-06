@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +17,10 @@
 
 package android.telephony;
 
+
 import android.text.format.Time;
+import android.os.Parcel;
+import android.os.Parcelable;
 import android.util.Log;
 
 import com.android.internal.telephony.GsmAlphabet;
@@ -116,6 +120,19 @@ public class SmsCbMessage {
             parseBody(pdu);
         }
     }
+
+    // copy constructor for SmsCbMessage
+    public SmsCbMessage(SmsCbMessage other) {
+        this.mHeader = other.mHeader;
+        this.mBody = other.mBody;
+        this.mLanguage = other.mLanguage;
+        this.mPrimaryNotificationTimestamp = other.mPrimaryNotificationTimestamp;
+        this.mPrimaryNotificationDigitalSignature
+                       = new byte[other.mPrimaryNotificationDigitalSignature.length];
+        System.arraycopy(other.mPrimaryNotificationDigitalSignature, 0,
+                this.mPrimaryNotificationDigitalSignature, 0,
+                other.mPrimaryNotificationDigitalSignature.length);
+  }
 
     /**
      * Return the geographical scope of this message, one of
@@ -451,9 +468,41 @@ public class SmsCbMessage {
         mBody = mBody + body;
     }
 
+    private SmsCbMessage(Parcel in) {
+        readFromParcel(in);
+    }
+
     @Override
     public String toString() {
         return "SmsCbMessage{" + mHeader.toString() + ", language=" + mLanguage +
                 ", body=\"" + mBody + "\"}";
     }
+
+
+    public void writeToParcel(Parcel dest, int flags) {
+        dest.writeParcelable(mHeader, 0);
+        dest.writeString(mBody);
+        dest.writeString(mLanguage);
+    }
+
+    private void readFromParcel(Parcel in) {
+        mHeader = in.readParcelable(SmsCbHeader.class.getClassLoader());
+        mBody = in.readString();
+        mLanguage = in.readString();
+    }
+
+    public int describeContents() {
+        return 0;
+    }
+
+    public static final Parcelable.Creator<SmsCbMessage> CREATOR =
+            new Parcelable.Creator<SmsCbMessage>() {
+        public SmsCbMessage createFromParcel(Parcel in) {
+            return new SmsCbMessage(in);
+        }
+
+        public SmsCbMessage[] newArray(int size) {
+            return new SmsCbMessage[size];
+        }
+    };
 }

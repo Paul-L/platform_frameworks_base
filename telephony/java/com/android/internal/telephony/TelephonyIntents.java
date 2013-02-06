@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -236,4 +237,32 @@ public class TelephonyIntents {
      */
     public static final String ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS
             = "android.intent.action.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS";
+    /**
+     * <p>Broadcast Action: It indicates the an RIL_UNSOL_OEM_HOOK_RAW message was received
+     * <p class="note">.
+     * This is to indicate OEM applications that an unsolicited OEM message was received.
+     *
+     * <p class="note">This is a protected intent that can only be sent
+     * by the system.
+     */
+    public static final String ACTION_UNSOL_RESPONSE_OEM_HOOK_RAW
+            = "android.intent.action.ACTION_UNSOL_RESPONSE_OEM_HOOK_RAW";
+
+    /**
+     * QoS State Intent. Used to indicate the status of QoS for the data connection.
+     */
+    public static final String ACTION_QOS_STATE_IND = "android.intent.action.ACTION_QOS_STATE_IND";
+
+    /**
+     * Broadcast Action: The default subscription has changed.  This has the following
+     * extra values:</p>
+     * <ul>
+     *   <li><em>phone_subscription</em> - A int, the current default subscription.</li>
+     * </ul>
+     *
+     * <p class="note">This is a protected intent that can only be sent
+     * by the system.
+     */
+    public static final String ACTION_DEFAULT_SUBSCRIPTION_CHANGED
+            = "android.intent.action.ACTION_DEFAULT_SUBSCRIPTION_CHANGED";
 }

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,8 +62,10 @@ import com.android.internal.app.ShutdownThread;
 import com.android.internal.policy.PolicyManager;
 import com.android.internal.statusbar.IStatusBarService;
 import com.android.internal.telephony.ITelephony;
+import com.android.internal.telephony.ITelephonyMSim;
 import com.android.internal.view.BaseInputHandler;
 import com.android.internal.widget.PointerLocationView;
+import android.telephony.TelephonyManager;
 
 import android.util.DisplayMetrics;
 import android.util.EventLog;
@@ -227,7 +230,33 @@ public class PhoneWindowManager implements WindowManagerPolicy {
 
     // Useful scan codes.
     private static final int SW_LID = 0x00;
+    private static final int SW_HEADPHONE_INSERT = 0x02;
+    private static final int SW_MICROPHONE_INSERT = 0x04;
+    //ToDo: This needs to be revisted once the kernel has support to report ANC event
+    private static final int SW_ANC_INSERT = 0x08;
+    private static final int SW_HEADSET_INSERT = (SW_HEADPHONE_INSERT|SW_MICROPHONE_INSERT);
+    private static final int SW_ANC_HEADPHONE_INSERT = 0x10;
+    private static final int SW_ANC_MICROPHONE_INSERT = 0x20;
+    private static final int SW_ANC_HEADSET_INSERT = (SW_ANC_HEADPHONE_INSERT|SW_ANC_MICROPHONE_INSERT);
     private static final int BTN_MOUSE = 0x110;
+
+    // Useful HeadSet codes...
+    private static int mHeadsetJackState = 0;
+    private static boolean mIsAncOn = false;
+    private static final int BIT_HEADSET = (1 << 0);
+    private static final int BIT_HEADSET_SPEAKER_ONLY = (1 << 1);
+    private static final int BIT_HEADSET_MIC_ONLY = (1 << 2);
+    private static final int BIT_ANC_HEADSET = (1 << 3);
+    private static final int BIT_ANC_HEADSET_SPEAKER_ONLY = (1 << 4);
+    private static final int BIT_ANC_HEADSET_MIC_ONLY = (1 << 5);
+    private static final int SUPPORTED_HEADSETS = (BIT_HEADSET|BIT_HEADSET_SPEAKER_ONLY|BIT_HEADSET_MIC_ONLY |
+                                                   BIT_ANC_HEADSET|BIT_ANC_HEADSET_SPEAKER_ONLY|BIT_ANC_HEADSET_MIC_ONLY );
+
+
+    String mHeadsetName = "Headset";
+    int mPrevHeadsetState;
+    int mCurHeadsetState;
+    final Object mHeadsetLock = new Object();
 
     /* Table of Application Launch keys.  Maps from key codes to intent categories.
      *
@@ -264,6 +293,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     WindowManagerFuncs mWindowManagerFuncs;
     LocalPowerManager mPowerManager;
     IStatusBarService mStatusBarService;
+
     Vibrator mVibrator; // Vibrator for giving feedback of orientation changes
 
     // Vibrator pattern for haptic feedback of a long press.
@@ -316,6 +346,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     boolean mSystemReady;
     boolean mSystemBooted;
     boolean mHdmiPlugged;
+    boolean mWifiDisplayConnected;
     int mUiMode = Configuration.UI_MODE_TYPE_NORMAL;
     int mDockMode = Intent.EXTRA_DOCK_STATE_UNDOCKED;
     int mLidOpenRotation;
@@ -815,6 +846,11 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             mDockMode = intent.getIntExtra(Intent.EXTRA_DOCK_STATE,
                     Intent.EXTRA_DOCK_STATE_UNDOCKED);
         }
+        // register for WIFI Display intents
+        IntentFilter wifiDisplayFilter = new IntentFilter(
+                                                Intent.ACTION_WIFI_DISPLAY_VIDEO);
+        Intent wifidisplayIntent = context.registerReceiver(
+                                      mWifiDisplayReceiver, wifiDisplayFilter);
 
         mVibrator = new Vibrator();
         mLongPressVibePattern = getLongIntArray(mContext.getResources(),
@@ -1464,6 +1500,15 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             Log.w(TAG, "Unable to find ITelephony interface.");
         }
         return telephonyService;
+    }
+
+    static ITelephonyMSim getMSimTelephonyService() {
+        ITelephonyMSim telephonyServiceMSim = ITelephonyMSim.Stub.asInterface(
+                ServiceManager.checkService(Context.MSIM_TELEPHONY_SERVICE));
+        if (telephonyServiceMSim == null) {
+            Log.w(TAG, "Unable to find ITelephony interface.");
+        }
+        return telephonyServiceMSim;
     }
 
     static IAudioService getAudioService() {
@@ -2596,6 +2641,229 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         setHdmiPlugged(!mHdmiPlugged);
     }
 
+    /** {@inheritDoc} */
+    public void notifyJackSwitchChanged(long whenNanos, int switchCode, boolean switchState) {
+        Slog.d(TAG,"notifyJackSwitchChanged(): switchCode "+switchCode+" switchState "+switchState);
+        synchronized(mHeadsetLock) {
+            if(switchCode == SW_ANC_INSERT) {
+                if(switchState) {
+                    mIsAncOn = true;
+                    if((mHeadsetJackState & BIT_HEADSET) != 0) {
+                        mHeadsetJackState &= ~BIT_HEADSET;
+                        mHeadsetJackState |= BIT_ANC_HEADSET;
+                    }
+                    if((mHeadsetJackState & BIT_HEADSET_SPEAKER_ONLY) != 0) {
+                        mHeadsetJackState &= ~BIT_HEADSET_SPEAKER_ONLY;
+                        mHeadsetJackState |= BIT_ANC_HEADSET_SPEAKER_ONLY;
+                    }
+                    if((mHeadsetJackState & BIT_HEADSET_MIC_ONLY) != 0) {
+                        mHeadsetJackState &= ~BIT_HEADSET_MIC_ONLY;
+                        mHeadsetJackState |= BIT_ANC_HEADSET_MIC_ONLY;
+                    }
+                } else {
+                    mIsAncOn = false;
+                    if((mHeadsetJackState & BIT_ANC_HEADSET) != 0) {
+                        mHeadsetJackState &= ~BIT_ANC_HEADSET;
+                        mHeadsetJackState |= BIT_HEADSET;
+                    }
+                    if((mHeadsetJackState & BIT_ANC_HEADSET_SPEAKER_ONLY) != 0) {
+                        mHeadsetJackState &= ~BIT_ANC_HEADSET_SPEAKER_ONLY;
+                        mHeadsetJackState |= BIT_HEADSET_SPEAKER_ONLY;
+                    }
+                    if((mHeadsetJackState & BIT_ANC_HEADSET_MIC_ONLY) != 0) {
+                        mHeadsetJackState &= ~BIT_ANC_HEADSET_MIC_ONLY;
+                        mHeadsetJackState |= BIT_HEADSET_MIC_ONLY;
+                    }
+                }
+            } else if ( switchCode == SW_HEADPHONE_INSERT) {
+                if (switchState) {
+                    if(mIsAncOn) {
+                        mHeadsetJackState |= BIT_ANC_HEADSET_SPEAKER_ONLY;
+                    } else {
+                        mHeadsetJackState |= BIT_HEADSET_SPEAKER_ONLY;
+                    }
+                } else if( (mHeadsetJackState & BIT_HEADSET) != 0 ) {
+                    mHeadsetJackState &= ~BIT_HEADSET;
+                    mHeadsetJackState |= BIT_HEADSET_MIC_ONLY;
+                } else if( (mHeadsetJackState & BIT_ANC_HEADSET) != 0 ) {
+                    mHeadsetJackState &= ~BIT_ANC_HEADSET;
+                    mHeadsetJackState |= BIT_ANC_HEADSET_MIC_ONLY;
+                } else {
+                    if(mIsAncOn) {
+                        mHeadsetJackState &= ~BIT_ANC_HEADSET_SPEAKER_ONLY;
+                    } else {
+                        mHeadsetJackState &= ~BIT_HEADSET_SPEAKER_ONLY;
+                    }
+                }
+            } else if ( switchCode == SW_MICROPHONE_INSERT) {
+                if (switchState) {
+                    if(mIsAncOn) {
+                        mHeadsetJackState |= BIT_ANC_HEADSET_MIC_ONLY;
+                    } else {
+                        mHeadsetJackState |= BIT_HEADSET_MIC_ONLY;
+                    }
+                } else if( (mHeadsetJackState & BIT_HEADSET) != 0 ) {
+                    mHeadsetJackState &= ~BIT_HEADSET;
+                    mHeadsetJackState |= BIT_HEADSET_SPEAKER_ONLY;
+                } else if( (mHeadsetJackState & BIT_ANC_HEADSET) != 0 ) {
+                    mHeadsetJackState &= ~BIT_ANC_HEADSET;
+                    mHeadsetJackState |= BIT_ANC_HEADSET_SPEAKER_ONLY;
+                } else {
+                    if(mIsAncOn) {
+                        mHeadsetJackState &= ~BIT_ANC_HEADSET_MIC_ONLY;
+                    } else {
+                        mHeadsetJackState &= ~BIT_HEADSET_MIC_ONLY;
+                    }
+                }
+            }
+
+            if( mHeadsetJackState == SW_HEADSET_INSERT ) {
+                // If both Speaker and Mic bits are set, remove them and
+                // set Headset bit to indicate Headset insertion
+                mHeadsetJackState = BIT_HEADSET;
+            }
+
+            if( mHeadsetJackState == SW_ANC_HEADSET_INSERT ) {
+                mHeadsetJackState = BIT_ANC_HEADSET;
+            }
+            update();
+        } // synchronized(mHeadsetLock)
+    }
+
+    private synchronized final void update() {
+
+        // Retain only relevant bits
+        int headsetState = mHeadsetJackState & SUPPORTED_HEADSETS;
+        // Set default delay to 10msec to allow all the events to reach before sending intent
+        int delay = 10;
+        // reject all suspect transitions: only accept state changes from:
+        // - a: 0 heaset to 1 headset
+        // - b: 1 headset to 0 headset
+        if (mCurHeadsetState == headsetState) {
+            return;
+        }
+
+        if (headsetState == 0) {
+            Intent intent = new Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+            mContext.sendBroadcast(intent);
+            // It can take hundreds of ms flush the audio pipeline after
+            // apps pause audio playback, but audio route changes are
+            // immediate, so delay the route change by 1000ms.
+            // This could be improved once the audio sub-system provides an
+            // interface to clear the audio pipeline.
+            delay = 1000;
+        } else {
+            // Insert the same delay for headset connection so that the connection event is not
+            // broadcast before the disconnection event in case of fast removal/insertion
+            if ( mIntentHandler.hasMessages(0)) {
+                delay = 1000;
+            }
+        }
+        mBroadcastWakeLock.acquire();
+        Slog.d(TAG,"update(): sending Message to IntentHander with delay of "+delay);
+        mIntentHandler.sendMessageDelayed( mIntentHandler.obtainMessage(0, mHeadsetName),
+                                           delay);
+    }
+
+    private synchronized final void sendIntents(String headsetName) {
+
+        Slog.d(TAG,"sendIntents(): mHeadsetJackState "+mHeadsetJackState+" mCurHeadsetState "+mCurHeadsetState+" mPrevHeadsetState "+mPrevHeadsetState);
+        int headsetState;
+
+        synchronized(mHeadsetLock) {
+            headsetState = mHeadsetJackState & SUPPORTED_HEADSETS;
+            if (mCurHeadsetState == headsetState) {
+                return;
+            }
+            mPrevHeadsetState = mCurHeadsetState;
+            mCurHeadsetState  = headsetState;
+        }
+
+        int allHeadsets = SUPPORTED_HEADSETS;
+        //Handle unplug events first and then handle plug-in events
+        for (int curHeadset = 1; curHeadset < SUPPORTED_HEADSETS; curHeadset <<= 1) {
+            if (((headsetState & curHeadset) == 0) && ((mPrevHeadsetState & curHeadset) == curHeadset)) {
+                if ((curHeadset & allHeadsets) != 0) {
+                    sendIntent(curHeadset, headsetState, mPrevHeadsetState, headsetName);
+                    allHeadsets &= ~curHeadset;
+                }
+            }
+        }
+
+        for (int curHeadset = 1; curHeadset < SUPPORTED_HEADSETS; curHeadset <<= 1) {
+            if (((headsetState & curHeadset) == curHeadset) && ((mPrevHeadsetState & curHeadset) == 0)) {
+                if ((curHeadset & allHeadsets) != 0) {
+                    sendIntent(curHeadset, headsetState, mPrevHeadsetState, headsetName);
+                    allHeadsets &= ~curHeadset;
+                }
+            }
+        }
+    }
+
+    private final void sendIntent(int headset, int headsetState, int prevHeadsetState, String headsetName) {
+
+        if ((headsetState & headset) != (prevHeadsetState & headset)) {
+            //  Pack up the values and broadcast them to everyone
+            Intent intent = new Intent(Intent.ACTION_HEADSET_PLUG);
+            intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY);
+            int state = 0;
+            int microphone = 0;
+            int speaker = 0;
+            int anc = 0;
+
+            if ((headset & BIT_HEADSET_SPEAKER_ONLY) != 0) {
+                speaker = 1;
+            }
+
+            if ((headset & BIT_HEADSET) != 0) {
+                microphone = 1;
+                speaker = 1;
+            }
+
+            if ((headset & BIT_HEADSET_MIC_ONLY) != 0) {
+                microphone = 1;
+            }
+
+            if ((headset & BIT_ANC_HEADSET_SPEAKER_ONLY) != 0) {
+                speaker = 1;
+                anc = 1;
+            }
+
+            if ((headset & BIT_ANC_HEADSET) != 0) {
+                microphone = 1;
+                speaker = 1;
+                anc = 1;
+            }
+
+            if ((headset & BIT_ANC_HEADSET_MIC_ONLY) != 0) {
+                microphone = 1;
+                anc = 1;
+            }
+
+            if ((headsetState & headset) != 0) {
+                state = 1;
+            }
+            intent.putExtra("state", state);
+            intent.putExtra("name", headsetName);
+            intent.putExtra("microphone", microphone);
+            intent.putExtra("speaker", speaker);
+            intent.putExtra("anc", anc);
+
+            Slog.d(TAG, "Headset detect: Intent.ACTION_HEADSET_PLUG: state: "+state+" name: "+headsetName+" mic: "+microphone+" speaker: "+speaker + " anc: " + anc);
+            // TODO: Should we require a permission?
+            ActivityManagerNative.broadcastStickyIntent(intent, null);
+        }
+    }
+
+    private final Handler mIntentHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+        Slog.d(TAG,"Headset detect: Inside handleMessage() for IntentHandler");
+            sendIntents((String)msg.obj);
+            mBroadcastWakeLock.release();
+        }
+    };
+
     /**
      * @return Whether music is being played right now.
      */
@@ -2606,6 +2874,18 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             return false;
         }
         return am.isMusicActive();
+    }
+
+    /**
+    * @return Whether FM is being played right now.
+    */
+    boolean isFMActive() {
+        final AudioManager am = (AudioManager)mContext.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) {
+            Log.w(TAG, "isFMActive: couldn't get AudioManager reference");
+            return false;
+        }
+        return am.isFMActive();
     }
 
     /**
@@ -2838,6 +3118,8 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                         // application, handle the volume change here.
                         handleVolumeKey(AudioManager.STREAM_MUSIC, keyCode);
                         break;
+                    } else if (isFMActive() && (result & ACTION_PASS_TO_USER) == 0) {
+                        handleVolumeKey(AudioManager.STREAM_FM, keyCode);
                     }
                 }
                 break;
@@ -3035,6 +3317,21 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         }
     };
 
+    BroadcastReceiver mWifiDisplayReceiver = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+        String action = intent.getAction();
+            if (action.equals(Intent.ACTION_WIFI_DISPLAY_VIDEO)) {
+                int state = intent.getIntExtra("state", 0);
+                if(state == 1) {
+                    mWifiDisplayConnected = true;
+                } else {
+                    mWifiDisplayConnected = false;
+                }
+                updateRotation(true);
+            }
+        }
+    };
+
     /** {@inheritDoc} */
     public void screenTurnedOff(int why) {
         EventLog.writeEvent(70000, 0);
@@ -3201,9 +3498,10 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 // enable 180 degree rotation while docked.
                 preferredRotation = mDeskDockEnablesAccelerometer
                         ? sensorRotation : mDeskDockRotation;
-            } else if (mHdmiPlugged) {
+            } else if (mHdmiPlugged || mWifiDisplayConnected) {
                 // Ignore sensor when plugged into HDMI.
-                // Note that the dock orientation overrides the HDMI orientation.
+                // or Wifi display is connected
+                // Note that the dock orientation overrides the HDMI/Wifi orientation.
                 preferredRotation = mHdmiRotation;
             } else if ((mAccelerometerDefault != 0 /* implies not rotation locked */
                             && (orientation == ActivityInfo.SCREEN_ORIENTATION_USER

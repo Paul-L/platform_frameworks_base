@@ -78,6 +78,7 @@ public final class CallManager {
     private static final int EVENT_SUPP_SERVICE_FAILED = 117;
     private static final int EVENT_SERVICE_STATE_CHANGED = 118;
     private static final int EVENT_POST_DIAL_CHARACTER = 119;
+    private static final int EVENT_SUPP_SERVICE_NOTIFY = 120;
 
     // Singleton instance
     private static final CallManager INSTANCE = new CallManager();
@@ -156,6 +157,9 @@ public final class CallManager {
     = new RegistrantList();
 
     protected final RegistrantList mSuppServiceFailedRegistrants
+    = new RegistrantList();
+
+    protected final RegistrantList mSuppServiceNotificationRegistrants
     = new RegistrantList();
 
     protected final RegistrantList mServiceStateChangedRegistrants
@@ -367,6 +371,22 @@ public final class CallManager {
         return getFirstActiveRingingCall().getPhone();
     }
 
+    /**
+     * @return the phone associated with any call
+     */
+    public Phone getPhoneInCall() {
+        Phone phone = null;
+        if (!getFirstActiveRingingCall().isIdle()) {
+            phone = getFirstActiveRingingCall().getPhone();
+        } else if (!getActiveFgCall().isIdle()) {
+            phone = getActiveFgCall().getPhone();
+        } else {
+            // If BG call is idle, we return default phone
+            phone = getFirstActiveBgCall().getPhone();
+        }
+        return phone;
+    }
+
     public void setAudioMode() {
         Context context = getContext();
         if (context == null) return;
@@ -388,6 +408,7 @@ public final class CallManager {
 
                 if (offhookPhone instanceof SipPhone) {
                     // enable IN_COMMUNICATION audio mode for sipPhone
+                    Log.d(LOG_TAG, "setAudioMode Set audio mode for SIP call!");
                     mode = AudioManager.MODE_IN_COMMUNICATION;
                 } else {
                     // enable IN_CALL audio mode for telephony
@@ -397,7 +418,12 @@ public final class CallManager {
         }
         // calling audioManager.setMode() multiple times in a short period of
         // time seems to break the audio recorder in in-call mode
-        if (audioManager.getMode() != mode) audioManager.setMode(mode);
+        int currMode = audioManager.getMode();
+        if (currMode != mode) {
+            Log.d(LOG_TAG, "setAudioMode Setting audio mode from "
+                    + currMode + " to " + mode);
+            audioManager.setMode(mode);
+        }
     }
 
     private Context getContext() {
@@ -418,10 +444,13 @@ public final class CallManager {
         phone.registerForDisplayInfo(mHandler, EVENT_DISPLAY_INFO, null);
         phone.registerForSignalInfo(mHandler, EVENT_SIGNAL_INFO, null);
         phone.registerForResendIncallMute(mHandler, EVENT_RESEND_INCALL_MUTE, null);
-        phone.registerForMmiInitiate(mHandler, EVENT_MMI_INITIATE, null);
-        phone.registerForMmiComplete(mHandler, EVENT_MMI_COMPLETE, null);
+        phone.registerForMmiInitiate(mHandler, EVENT_MMI_INITIATE, phone);
+        phone.registerForMmiComplete(mHandler, EVENT_MMI_COMPLETE, phone);
         phone.registerForSuppServiceFailed(mHandler, EVENT_SUPP_SERVICE_FAILED, null);
         phone.registerForServiceStateChanged(mHandler, EVENT_SERVICE_STATE_CHANGED, null);
+        if (phone.getPhoneType() == Phone.PHONE_TYPE_GSM) {
+            phone.registerForSuppServiceNotification(mHandler, EVENT_SUPP_SERVICE_NOTIFY, null);
+        }
 
         // for events supported only by GSM and CDMA phone
         if (phone.getPhoneType() == Phone.PHONE_TYPE_GSM ||
@@ -454,6 +483,7 @@ public final class CallManager {
         phone.unregisterForMmiInitiate(mHandler);
         phone.unregisterForMmiComplete(mHandler);
         phone.unregisterForSuppServiceFailed(mHandler);
+        phone.unregisterForSuppServiceNotification(mHandler);
         phone.unregisterForServiceStateChanged(mHandler);
 
         // for events supported only by GSM and CDMA phone
@@ -699,10 +729,6 @@ public final class CallManager {
         if (VDBG) {
             Log.d(LOG_TAG, " dial(" + basePhone + ", "+ dialString + ")");
             Log.d(LOG_TAG, this.toString());
-        }
-
-        if (!canDial(phone)) {
-            throw new CallStateException("cannot dial in current state");
         }
 
         if ( hasActiveFgCall() ) {
@@ -1271,6 +1297,27 @@ public final class CallManager {
     }
 
     /**
+     * Register for supplementary service notifications.
+     * Message.obj will contain an AsyncResult.
+     *
+     * @param h Handler that receives the notification message.
+     * @param what User-defined message code.
+     * @param obj User object.
+     */
+    public void registerForSuppServiceNotification(Handler h, int what, Object obj){
+        mSuppServiceNotificationRegistrants.addUnique(h, what, obj);
+    }
+
+    /**
+     * Unregister for supplementary service notifications.
+     *
+     * @param h Handler to be removed from the registrant list.
+     */
+    public void unregisterForSuppServiceNotification(Handler h){
+        mSuppServiceNotificationRegistrants.remove(h);
+    }
+
+    /**
      * Register for notifications when a sInCall VoicePrivacy is enabled
      *
      * @param h Handler that receives the notification message.
@@ -1778,6 +1825,10 @@ public final class CallManager {
                 case EVENT_SUPP_SERVICE_FAILED:
                     if (VDBG) Log.d(LOG_TAG, " handleMessage (EVENT_SUPP_SERVICE_FAILED)");
                     mSuppServiceFailedRegistrants.notifyRegistrants((AsyncResult) msg.obj);
+                    break;
+                case EVENT_SUPP_SERVICE_NOTIFY:
+                    if (VDBG) Log.d(LOG_TAG, " handleMessage (EVENT_SUPP_SERVICE_NOTIFICATION)");
+                    mSuppServiceNotificationRegistrants.notifyRegistrants((AsyncResult) msg.obj);
                     break;
                 case EVENT_SERVICE_STATE_CHANGED:
                     if (VDBG) Log.d(LOG_TAG, " handleMessage (EVENT_SERVICE_STATE_CHANGED)");

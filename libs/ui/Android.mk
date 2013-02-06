@@ -21,8 +21,7 @@ commonSources:= \
 	Keyboard.cpp \
 	KeyLayoutMap.cpp \
 	KeyCharacterMap.cpp \
-	VirtualKeyMap.cpp \
-    Overlay.cpp
+	VirtualKeyMap.cpp
 
 # For the host
 # =====================================================
@@ -63,6 +62,11 @@ LOCAL_SHARED_LIBRARIES := \
 	libhardware_legacy \
 	libskia \
 	libbinder
+
+ifeq ($(TARGET_USES_TESTFRAMEWORK),true)
+LOCAL_CFLAGS += -DGFX_TESTFRAMEWORK
+LOCAL_SHARED_LIBRARIES += libtestframework
+endif
 
 LOCAL_C_INCLUDES := \
     external/skia/include/core

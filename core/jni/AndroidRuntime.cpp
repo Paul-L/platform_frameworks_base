@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (C) 2006,2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,6 +88,10 @@ extern int register_android_media_ToneGenerator(JNIEnv *env);
 
 extern int register_android_util_FloatMath(JNIEnv* env);
 
+#ifndef NON_QCOM_TARGET
+extern int register_android_hardware_fm_fmradio(JNIEnv* env);
+#endif
+
 namespace android {
 
 /*
@@ -97,6 +101,7 @@ namespace android {
 extern int register_android_content_AssetManager(JNIEnv* env);
 extern int register_android_util_EventLog(JNIEnv* env);
 extern int register_android_util_Log(JNIEnv* env);
+extern int register_android_util_jTestFramework(JNIEnv* env);
 extern int register_android_content_StringBlock(JNIEnv* env);
 extern int register_android_content_XmlBlock(JNIEnv* env);
 extern int register_android_emoji_EmojiFactory(JNIEnv* env);
@@ -177,10 +182,8 @@ extern int register_android_content_res_ObbScanner(JNIEnv* env);
 extern int register_android_content_res_Configuration(JNIEnv* env);
 extern int register_android_animation_PropertyValuesHolder(JNIEnv *env);
 extern int register_com_android_internal_content_NativeLibraryHelper(JNIEnv *env);
-#ifdef QCOM_HARDWARE
+extern int register_com_android_internal_app_ActivityTrigger(JNIEnv *env);
 extern int register_org_codeaurora_Performance(JNIEnv *env);
-#endif
- 
 
 static AndroidRuntime* gCurRuntime = NULL;
 
@@ -1089,6 +1092,7 @@ static const RegJNIRec gRegJNI[] = {
     REG_JNI(register_android_os_SystemClock),
     REG_JNI(register_android_util_EventLog),
     REG_JNI(register_android_util_Log),
+    REG_JNI(register_android_util_jTestFramework),
     REG_JNI(register_android_util_FloatMath),
     REG_JNI(register_android_text_format_Time),
     REG_JNI(register_android_content_AssetManager),
@@ -1208,8 +1212,10 @@ static const RegJNIRec gRegJNI[] = {
     REG_JNI(register_android_animation_PropertyValuesHolder),
     REG_JNI(register_com_android_internal_content_NativeLibraryHelper),
 
-#ifdef QCOM_HARDWARE
+    REG_JNI(register_com_android_internal_app_ActivityTrigger),
     REG_JNI(register_org_codeaurora_Performance),
+#ifndef NON_QCOM_TARGET
+    REG_JNI(register_android_hardware_fm_fmradio),
 #endif
 };
 

@@ -87,9 +87,7 @@ void CameraSourceListener::postDataTimestamp(
 }
 
 static int32_t getColorFormat(const char* colorFormat) {
-#ifdef QCOM_HARDWARE
     return OMX_COLOR_FormatYUV420SemiPlanar;
-#endif
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV420P)) {
        return OMX_COLOR_FormatYUV420Planar;
@@ -100,12 +98,7 @@ static int32_t getColorFormat(const char* colorFormat) {
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV420SP)) {
-#ifdef EXYNOS4210_ENHANCEMENTS
-        static const int OMX_SEC_COLOR_FormatNV12LPhysicalAddress = 0x7F000002;
-        return OMX_SEC_COLOR_FormatNV12LPhysicalAddress;
-#else
         return OMX_COLOR_FormatYUV420SemiPlanar;
-#endif
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV422I)) {
@@ -276,12 +269,8 @@ static void getSupportedVideoSizes(
  */
 status_t CameraSource::isCameraColorFormatSupported(
         const CameraParameters& params) {
-    const char* fmt = params.get(CameraParameters::KEY_VIDEO_FRAME_FORMAT);
-    if (!fmt) {
-        LOGE("Missing parameter %s!", CameraParameters::KEY_VIDEO_FRAME_FORMAT);
-        return BAD_VALUE;
-    }
-    mColorFormat = getColorFormat(fmt);
+    mColorFormat = getColorFormat(params.get(
+            CameraParameters::KEY_VIDEO_FRAME_FORMAT));
     if (mColorFormat == -1) {
         return BAD_VALUE;
     }
@@ -541,7 +530,6 @@ status_t CameraSource::initWithCameraAccess(
         }
     }
 
-#ifdef QCOM_HARDWARE
     const char *hfr_str = params.get("video-hfr");
     int32_t hfr = -1;
     if ( hfr_str != NULL ) {
@@ -551,12 +539,16 @@ status_t CameraSource::initWithCameraAccess(
       LOGW("Invalid hfr value(%d) set from app. Disabling HFR.", hfr);
       hfr = 0;
     }
-#endif
 
     int64_t glitchDurationUs = (1000000LL / mVideoFrameRate);
     if (glitchDurationUs > mGlitchDurationThresholdUs) {
         mGlitchDurationThresholdUs = glitchDurationUs;
     }
+
+    const char * k3dFrameArrangement = "3d-frame-format";
+    const char * arrangement = params.get(k3dFrameArrangement);
+    // XXX: just assume left/right for now since that's all the camera supports
+    bool want3D = (arrangement != NULL && !strcmp("left-right", arrangement));
 
     // XXX: query camera for the stride and slice height
     // when the capability becomes available.
@@ -568,9 +560,11 @@ status_t CameraSource::initWithCameraAccess(
     mMeta->setInt32(kKeyStride,      mVideoSize.width);
     mMeta->setInt32(kKeySliceHeight, mVideoSize.height);
     mMeta->setInt32(kKeyFrameRate,   mVideoFrameRate);
-#ifdef QCOM_HARDWARE
     mMeta->setInt32(kKeyHFR, hfr);
-#endif
+
+    if (want3D) {
+        mMeta->setInt32(kKey3D, !0);
+    }
     return OK;
 }
 

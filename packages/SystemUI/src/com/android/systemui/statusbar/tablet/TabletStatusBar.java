@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +49,8 @@ import android.os.IBinder;
 import android.os.Message;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.telephony.MSimTelephonyManager;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Slog;
 import android.view.accessibility.AccessibilityEvent;
@@ -73,6 +76,7 @@ import android.widget.TextView;
 import com.android.internal.statusbar.StatusBarIcon;
 import com.android.internal.statusbar.StatusBarNotification;
 import com.android.systemui.R;
+import com.android.systemui.statusbar.*;
 import com.android.systemui.recent.RecentTasksLoader;
 import com.android.systemui.recent.RecentsPanelView;
 import com.android.systemui.statusbar.NotificationData;
@@ -84,6 +88,7 @@ import com.android.systemui.statusbar.policy.BluetoothController;
 import com.android.systemui.statusbar.policy.CompatModeButton;
 import com.android.systemui.statusbar.policy.LocationController;
 import com.android.systemui.statusbar.policy.NetworkController;
+import com.android.systemui.statusbar.policy.MSimNetworkController;
 import com.android.systemui.statusbar.policy.Prefs;
 
 public class TabletStatusBar extends StatusBar implements
@@ -166,6 +171,7 @@ public class TabletStatusBar extends StatusBar implements
     BluetoothController mBluetoothController;
     LocationController mLocationController;
     NetworkController mNetworkController;
+    MSimNetworkController mMSimNetworkController;
 
     ViewGroup mBarContents;
 
@@ -188,7 +194,7 @@ public class TabletStatusBar extends StatusBar implements
     private RecentTasksLoader mRecentTasksLoader;
     private InputMethodsPanel mInputMethodsPanel;
     private CompatModePanel mCompatModePanel;
-
+    private int prevAltOrientation = Configuration.ORIENTATION_UNDEFINED;
     private int mSystemUiVisibility = 0;
     // used to notify status bar for suppressing notification LED
     private boolean mPanelSlightlyVisible;
@@ -218,26 +224,51 @@ public class TabletStatusBar extends StatusBar implements
 
         // network icons: either a combo icon that switches between mobile and data, or distinct
         // mobile and data icons
+
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
         final ImageView mobileRSSI = 
                 (ImageView)mNotificationPanel.findViewById(R.id.mobile_signal);
         if (mobileRSSI != null) {
-            mNetworkController.addPhoneSignalIconView(mobileRSSI);
+            mMSimNetworkController.addPhoneSignalIconView(mobileRSSI);
         }
         final ImageView wifiRSSI = 
                 (ImageView)mNotificationPanel.findViewById(R.id.wifi_signal);
         if (wifiRSSI != null) {
-            mNetworkController.addWifiIconView(wifiRSSI);
+            mMSimNetworkController.addWifiIconView(wifiRSSI);
         }
-        mNetworkController.addWifiLabelView(
+        mMSimNetworkController.addWifiLabelView(
                 (TextView)mNotificationPanel.findViewById(R.id.wifi_text));
 
-        mNetworkController.addDataTypeIconView(
+        mMSimNetworkController.addDataTypeIconView(
                 (ImageView)mNotificationPanel.findViewById(R.id.mobile_type));
-        mNetworkController.addMobileLabelView(
+        mMSimNetworkController.addMobileLabelView(
                 (TextView)mNotificationPanel.findViewById(R.id.mobile_text));
-        mNetworkController.addCombinedLabelView(
+        mMSimNetworkController.addCombinedLabelView(
                 (TextView)mBarContents.findViewById(R.id.network_text));
+    } else {
 
+            final ImageView mobileRSSI =
+                     (ImageView)mNotificationPanel.findViewById(R.id.mobile_signal);
+            if (mobileRSSI != null) { 
+            mNetworkController.addPhoneSignalIconView(mobileRSSI);
+           }
+          
+           final ImageView wifiRSSI =
+                  (ImageView)mNotificationPanel.findViewById(R.id.wifi_signal);
+           if (wifiRSSI != null) {
+              mNetworkController.addWifiIconView(wifiRSSI);
+           }
+	      
+              mNetworkController.addWifiLabelView(
+                   (TextView)mNotificationPanel.findViewById(R.id.wifi_text));
+              mNetworkController.addDataTypeIconView(
+                   (ImageView)mNotificationPanel.findViewById(R.id.mobile_type));
+              mNetworkController.addMobileLabelView(
+                   (TextView)mNotificationPanel.findViewById(R.id.mobile_text));
+              mNetworkController.addCombinedLabelView(
+                   (TextView)mBarContents.findViewById(R.id.network_text));
+
+        }
         mStatusBarView.setIgnoreChildren(0, mNotificationTrigger, mNotificationPanel);
 
         WindowManager.LayoutParams lp = mNotificationPanelParams = new WindowManager.LayoutParams(
@@ -391,8 +422,28 @@ public class TabletStatusBar extends StatusBar implements
     }
 
     @Override
+    protected void setHardwareAcceleration(WindowManager.LayoutParams lp) {
+        lp.format = PixelFormat.OPAQUE;
+        lp.flags |= WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+    }
+
+    @Override
     protected void onConfigurationChanged(Configuration newConfig) {
         mHeightReceiver.updateHeight(); // display size may have changed
+        if ((newConfig.altOrientation == Configuration.ORIENTATION_REVERSE_LANDSCAPE &&
+             prevAltOrientation == Configuration.ORIENTATION_LANDSCAPE) ||
+            (newConfig.altOrientation == Configuration.ORIENTATION_REVERSE_PORTRAIT &&
+             prevAltOrientation == Configuration.ORIENTATION_PORTRAIT) ||
+            (newConfig.altOrientation == Configuration.ORIENTATION_PORTRAIT &&
+             prevAltOrientation == Configuration.ORIENTATION_REVERSE_PORTRAIT) ||
+            (newConfig.altOrientation == Configuration.ORIENTATION_LANDSCAPE &&
+             prevAltOrientation == Configuration.ORIENTATION_REVERSE_LANDSCAPE))
+        {
+
+            mNavigationArea.invalidate();
+            mNotificationArea.invalidate();
+        }
+        prevAltOrientation = newConfig.altOrientation;
         loadDimens();
         mNotificationPanelParams.height = getNotificationPanelHeight();
         WindowManagerImpl.getDefault().updateViewLayout(mNotificationPanel,
@@ -491,10 +542,21 @@ public class TabletStatusBar extends StatusBar implements
         mBluetoothController = new BluetoothController(mContext);
         mBluetoothController.addIconView((ImageView)sb.findViewById(R.id.bluetooth));
 
-        mNetworkController = new NetworkController(mContext);
-        final SignalClusterView signalCluster = 
-                (SignalClusterView)sb.findViewById(R.id.signal_cluster);
-        mNetworkController.addSignalCluster(signalCluster);
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            final MSimSignalClusterView mSimSignalCluster =
+                    (MSimSignalClusterView)sb.findViewById(R.id.msim_signal_cluster);
+
+            mMSimNetworkController = new MSimNetworkController(mContext);
+            for(int i=0; i < MSimTelephonyManager.getDefault().getPhoneCount(); i++) {
+                mMSimNetworkController.addSignalCluster(mSimSignalCluster, i);
+            }
+        } else {
+            final SignalClusterView signalCluster =
+                    (SignalClusterView)sb.findViewById(R.id.signal_cluster);
+
+            mNetworkController = new NetworkController(mContext);
+            mNetworkController.addSignalCluster(signalCluster);
+        }
 
         // The navigation buttons
         mBackButton = (ImageView)sb.findViewById(R.id.back);
@@ -1908,8 +1970,15 @@ public class TabletStatusBar extends StatusBar implements
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
         pw.print("mDisabled=0x");
         pw.println(Integer.toHexString(mDisabled));
-        pw.println("mNetworkController:");
-        mNetworkController.dump(fd, pw, args);
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            pw.println("mMSimNetworkController:");
+            for(int i=0; i < MSimTelephonyManager.getDefault().getPhoneCount(); i++) {
+                mMSimNetworkController.dump(fd, pw, args, i);
+            }
+        } else {
+            pw.println("mNetworkController:");
+            mNetworkController.dump(fd, pw, args);
+        }
     }
 }
 

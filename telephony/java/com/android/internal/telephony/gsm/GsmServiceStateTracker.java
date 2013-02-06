@@ -22,20 +22,30 @@ import com.android.internal.telephony.DataConnectionTracker;
 import com.android.internal.telephony.EventLogTags;
 import com.android.internal.telephony.IccCard;
 import com.android.internal.telephony.MccTable;
+import com.android.internal.telephony.MSimConstants;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.RestrictedState;
+import com.android.internal.R;
 import com.android.internal.telephony.RILConstants;
 import com.android.internal.telephony.ServiceStateTracker;
 import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.TelephonyProperties;
+import com.android.internal.telephony.UiccCard;
+import com.android.internal.telephony.UiccCardApplication;
+import com.android.internal.telephony.CommandsInterface.RadioState;
+import com.android.internal.telephony.IccCardApplicationStatus.AppState;
+import com.android.internal.telephony.UiccManager.AppFamily;
+import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
 
 import android.app.AlarmManager;
+import android.app.AlertDialog;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
@@ -58,6 +68,9 @@ import android.text.TextUtils;
 import android.util.EventLog;
 import android.util.Log;
 import android.util.TimeUtils;
+import android.view.KeyEvent;
+import android.view.WindowManager;
+import android.preference.PreferenceManager;
 
 import java.util.Arrays;
 import java.util.Calendar;
@@ -67,7 +80,7 @@ import java.util.TimeZone;
 /**
  * {@hide}
  */
-final class GsmServiceStateTracker extends ServiceStateTracker {
+class GsmServiceStateTracker extends ServiceStateTracker {
     static final String LOG_TAG = "GSM";
     static final boolean DBG = true;
 
@@ -82,6 +95,10 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     private int mNewMaxDataCalls = 1;
     private int mReasonDataDenied = -1;
     private int mNewReasonDataDenied = -1;
+
+    // Key used to read and write the saved network selection numeric value
+    private static final String NETWORK_SELECTION_KEY = "network_selection_key";
+    private static boolean isManagedRoamingDialogDisplayed = false;
 
     /**
      * GSM roaming status solely based on TS 27.007 7.2 CREG. Only used by
@@ -116,12 +133,6 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     long mSavedTime;
     long mSavedAtTime;
 
-    /**
-     * We can't register for SIM_RECORDS_LOADED immediately because the
-     * SIMRecords object may not be instantiated yet.
-     */
-    private boolean mNeedToRegForSimLoaded;
-
     /** Started the recheck process after finding gprs should registered but not. */
     private boolean mStartedGprsRegCheck = false;
 
@@ -145,6 +156,17 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     /** waiting period before recheck gprs and voice registration. */
     static final int DEFAULT_GPRS_CHECK_PERIOD_MILLIS = 60 * 1000;
 
+    private int mDataRadioTechnology = 0;
+    private int mTAC = -1;
+
+    /** Multimode related */
+    private boolean mIsMultimodeCdmaPhone =
+            SystemProperties.getBoolean(TelephonyProperties.PROPERTY_MULTIMODE_CDMA, false);
+
+    /** EONS enabled flag. */
+    private boolean mEonsEnabled =
+            SystemProperties.getBoolean(TelephonyProperties.PROPERTY_EONS_ENABLED, true);
+
     /** Notification type. */
     static final int PS_ENABLED = 1001;            // Access Control blocks data service
     static final int PS_DISABLED = 1002;           // Access Control enables data service
@@ -160,6 +182,12 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     private BroadcastReceiver mIntentReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (!phone.mIsTheCurrentActivePhone) {
+                Log.e(LOG_TAG, "Received Intent " + intent +
+                    " while being destroyed. Ignoring.");
+                return;
+            }
+
             if (intent.getAction().equals(Intent.ACTION_LOCALE_CHANGED)) {
                 // update emergency string whenever locale changed
                 updateSpnDisplay();
@@ -184,10 +212,9 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     };
 
     public GsmServiceStateTracker(GSMPhone phone) {
-        super();
+        super(phone.mCM);
 
         this.phone = phone;
-        cm = phone.mCM;
         ss = new ServiceState();
         newSS = new ServiceState();
         cellLoc = new GsmCellLocation();
@@ -202,10 +229,10 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         cm.registerForRadioStateChanged(this, EVENT_RADIO_STATE_CHANGED, null);
 
         cm.registerForVoiceNetworkStateChanged(this, EVENT_NETWORK_STATE_CHANGED, null);
+        cm.registerForDataNetworkStateChanged(this, EVENT_NETWORK_STATE_CHANGED, null);
         cm.setOnNITZTime(this, EVENT_NITZ_TIME, null);
         cm.setOnSignalStrengthUpdate(this, EVENT_SIGNAL_STRENGTH_UPDATE, null);
         cm.setOnRestrictedStateChanged(this, EVENT_RESTRICTED_STATE_CHANGED, null);
-        cm.registerForSIMReady(this, EVENT_SIM_READY, null);
 
         // system setting property AIRPLANE_MODE_ON is set in Settings.
         int airplaneMode = Settings.System.getInt(
@@ -222,7 +249,6 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 mAutoTimeZoneObserver);
 
         setSignalStrengthDefaultValues();
-        mNeedToRegForSimLoaded = true;
 
         // Monitor locale change
         IntentFilter filter = new IntentFilter();
@@ -231,21 +257,43 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
 
         // Gsm doesn't support OTASP so its not needed
         phone.notifyOtaspChanged(OTASP_NOT_NEEDED);
+
+        // For CDMA global phone registered on 3GPP get the CDMA subscription
+        // for voice mail number translation and also get the PRL version to be
+        // displayed to the user
+        if (mIsMultimodeCdmaPhone) {
+            mCdmaSSM = CdmaSubscriptionSourceManager.getInstance(phone.getContext(), cm, this,
+                    EVENT_CDMA_SUBSCRIPTION_SOURCE_CHANGED, null);
+            cm.registerForCdmaPrlChanged(this, EVENT_CDMA_PRL_VERSION_CHANGED, null);
+        }
+
+        Log.i(LOG_TAG,"Is EONS enabled: " + mEonsEnabled);
     }
 
     public void dispose() {
+        log("ServiceStateTracker dispose");
+
         // Unregister for all events.
         cm.unregisterForAvailable(this);
         cm.unregisterForRadioStateChanged(this);
         cm.unregisterForVoiceNetworkStateChanged(this);
-        cm.unregisterForSIMReady(this);
-
-        phone.mIccRecords.unregisterForRecordsLoaded(this);
+        cm.unregisterForDataNetworkStateChanged(this);
+        if (mUiccApplcation != null) {mUiccApplcation.unregisterForReady(this);}
+        if (mIccRecords != null) {
+            mIccRecords.unregisterForRecordsLoaded(this);
+            mIccRecords.unregisterForRecordsEvents(this);
+        }
         cm.unSetOnSignalStrengthUpdate(this);
         cm.unSetOnRestrictedStateChanged(this);
         cm.unSetOnNITZTime(this);
         cr.unregisterContentObserver(this.mAutoTimeObserver);
         cr.unregisterContentObserver(this.mAutoTimeZoneObserver);
+        phone.getContext().unregisterReceiver(mIntentReceiver);
+
+        if (mIsMultimodeCdmaPhone) {
+            mCdmaSSM.dispose(this);
+            cm.unregisterForCdmaPrlChanged(this);
+        }
     }
 
     protected void finalize() {
@@ -263,6 +311,11 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         String[] strings;
         Message message;
 
+        if (!phone.mIsTheCurrentActivePhone) {
+            Log.e(LOG_TAG, "Received message " + msg +
+                    "[" + msg.what + "] while being destroyed. Ignoring.");
+            return;
+        }
         switch (msg.what) {
             case EVENT_RADIO_AVAILABLE:
                 //this is unnecessary
@@ -270,18 +323,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 break;
 
             case EVENT_SIM_READY:
-                // Set the network type, in case the radio does not restore it.
-                cm.setCurrentPreferredNetworkType();
-
-                // The SIM is now ready i.e if it was locked
-                // it has been unlocked. At this stage, the radio is already
-                // powered on.
-                if (mNeedToRegForSimLoaded) {
-                    phone.mIccRecords.registerForRecordsLoaded(this,
-                            EVENT_SIM_RECORDS_LOADED, null);
-                    mNeedToRegForSimLoaded = false;
-                }
-
+                log("EVENT_SIM_READY received");
                 boolean skipRestoringSelection = phone.getContext().getResources().getBoolean(
                         com.android.internal.R.bool.skip_restoring_network_selection);
 
@@ -292,9 +334,17 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 pollState();
                 // Signal strength polling stops when radio is off
                 queueNextSignalStrengthPoll();
+
+                getSubscriptionInfo();
                 break;
 
             case EVENT_RADIO_STATE_CHANGED:
+                // Register for CDMA subscription source for CDMA global phone registered
+                // on 3GPP
+                if(mIsMultimodeCdmaPhone && (cm.getRadioState() == RadioState.RADIO_ON)) {
+                    handleCdmaSubscriptionSource(mCdmaSSM.getCdmaSubscriptionSource());
+                }
+
                 // This will do nothing in the radio not
                 // available case
                 setPowerStateToDesired();
@@ -309,12 +359,12 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 // This callback is called when signal strength is polled
                 // all by itself
 
-                if (!(cm.getRadioState().isOn()) || (cm.getRadioState().isCdma())) {
+                if (!(cm.getRadioState().isOn())) {
                     // Polling will continue when radio turns back on and not CDMA
                     return;
                 }
                 ar = (AsyncResult) msg.obj;
-                onSignalStrengthResult(ar);
+                onSignalStrengthResult(ar, phone, true);
                 queueNextSignalStrengthPoll();
 
                 break;
@@ -381,11 +431,16 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 // we don't have to ask it
                 dontPollSignalStrength = true;
 
-                onSignalStrengthResult(ar);
+                onSignalStrengthResult(ar, phone, true);
                 break;
 
             case EVENT_SIM_RECORDS_LOADED:
                 updateSpnDisplay();
+                break;
+
+            case EVENT_ICC_RECORD_EVENTS:
+                ar = (AsyncResult)msg.obj;
+                processIccRecordEvents((Integer)ar.result);
                 break;
 
             case EVENT_LOCATION_UPDATES_ENABLED:
@@ -452,6 +507,27 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 onRestrictedStateChanged(ar);
                 break;
 
+            case EVENT_NV_READY:
+                // For Non-RUIM phones, the subscription information is stored in
+                // Non Volatile. Here when Non-Volatile is ready, we can poll the CDMA
+                // subscription info.
+                log("EVENT_NV_READY received");
+                getSubscriptionInfo();
+                break;
+
+            case EVENT_POLL_STATE_CDMA_SUBSCRIPTION:
+                ar = (AsyncResult)msg.obj;
+                if (ar.exception != null || ar.result == null) {
+                    Log.e(LOG_TAG, "Error while fetching Mdn");
+                    break;
+                }
+                String localTemp[] = (String[])ar.result;
+                mMdn = localTemp[0];
+                if (localTemp.length > 4) {
+                    mPrlVersion = localTemp[4];
+                }
+                break;
+
             default:
                 super.handleMessage(msg);
             break;
@@ -482,7 +558,51 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         cm.setRadioPower(false, null);
     }
 
+    private void processIccRecordEvents(int eventCode) {
+        switch (eventCode) {
+            case SIMRecords.EVENT_SPN:
+                updateSpnDisplay();
+                break;
+            case SIMRecords.EVENT_EONS:
+                if (mEonsEnabled) {
+                    int lactac = getLacOrTac();
+                    boolean needsSpnUpdate =
+                       ((SIMRecords)phone.mIccRecords).updateEons(ss.getOperatorNumeric(), lactac);
+                    if (needsSpnUpdate) {
+                        updateSpnDisplay();
+                    }
+                }
+                break;
+        }
+    }
+
+    public void updateEons() {
+        boolean needsUpdate = false;
+        int lactac = -1;
+
+        if (phone.mIccRecords == null) return;
+
+        lactac = getLacOrTac();
+
+        needsUpdate = ((SIMRecords)phone.mIccRecords).updateEons(ss.getOperatorNumeric(), lactac);
+        Log.d(LOG_TAG, "[EONS] updateEons() lactac = " + lactac + " , needsUpdate = " +
+                needsUpdate + " , OperatorNumeric = " + ss.getOperatorNumeric());
+        if (needsUpdate) {
+            String eonsLong = ((SIMRecords)phone.mIccRecords).getEons();
+            Log.d(LOG_TAG, "[EONS] updateEons() eonsLong = " + eonsLong);
+            if (eonsLong != null) {
+                // Update operator long name with EONS Long.
+                ss.setOperatorName(eonsLong, ss.getOperatorAlphaShort(),
+                      ss.getOperatorNumeric());
+            }
+            updateSpnDisplay();
+        }
+    }
+
     protected void updateSpnDisplay() {
+        if (phone.mIccRecords == null) {
+            return;
+        }
         int rule = phone.mIccRecords.getDisplayRule(ss.getOperatorNumeric());
         String spn = phone.mIccRecords.getServiceProviderName();
         String plmn = ss.getOperatorAlphaLong();
@@ -498,7 +618,8 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 || !TextUtils.equals(spn, curSpn)
                 || !TextUtils.equals(plmn, curPlmn)) {
             boolean showSpn = !mEmergencyOnly && !TextUtils.isEmpty(spn)
-                && (rule & SIMRecords.SPN_RULE_SHOW_SPN) == SIMRecords.SPN_RULE_SHOW_SPN;
+                && (rule & SIMRecords.SPN_RULE_SHOW_SPN) == SIMRecords.SPN_RULE_SHOW_SPN
+                && (ss.getState() == ServiceState.STATE_IN_SERVICE);
             boolean showPlmn = !TextUtils.isEmpty(plmn) &&
                 (rule & SIMRecords.SPN_RULE_SHOW_PLMN) == SIMRecords.SPN_RULE_SHOW_PLMN;
 
@@ -513,12 +634,25 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
             intent.putExtra(Intents.EXTRA_SPN, spn);
             intent.putExtra(Intents.EXTRA_SHOW_PLMN, showPlmn);
             intent.putExtra(Intents.EXTRA_PLMN, plmn);
+            intent.putExtra(MSimConstants.SUBSCRIPTION_KEY, phone.getSubscription());
             phone.getContext().sendStickyBroadcast(intent);
         }
 
         curSpnRule = rule;
         curSpn = spn;
         curPlmn = plmn;
+    }
+
+    private int getLacOrTac() {
+        int lactac = -1;
+        if ((mDataRadioTechnology == ServiceState.RADIO_TECHNOLOGY_LTE) &&
+                (gprsState == ServiceState.STATE_IN_SERVICE) &&
+                (mTAC >= 0)) {
+            lactac = mTAC;
+        } else {
+            if (cellLoc != null) lactac = cellLoc.getLac();
+        }
+        return lactac;
     }
 
     /**
@@ -585,6 +719,19 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                     }
 
                     mGsmRoaming = regCodeIsRoaming(regState);
+
+                    if ((regState == 3 || regState == 13) && (states.length >= 14)) {
+                        try {
+                            int rejCode = Integer.parseInt(states[13]);
+                            // Check if rejCode is "Persistent location update reject",
+                            if (rejCode == 10) {
+                                createManagedRoamingDialog();
+                            }
+                        } catch (NumberFormatException ex) {
+                            Log.w(LOG_TAG, "error parsing regCode: " + ex);
+                        }
+                    }
+
                     newSS.setState (regCodeToServiceState(regState));
 
                     if (regState == 10 || regState == 12 || regState == 13 || regState == 14) {
@@ -619,6 +766,10 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                             if (states.length >= 6) {
                                 mNewMaxDataCalls = Integer.parseInt(states[5]);
                             }
+                            if (states[1] != null && states[1].length() > 0) {
+                                mTAC = Integer.parseInt(states[1], 16);
+                                Log.d(LOG_TAG, "[EONS] Received TAC = " + mTAC);
+                            }
                         } catch (NumberFormatException ex) {
                             loge("error parsing GprsRegistrationState: " + ex);
                         }
@@ -627,6 +778,10 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                     mDataRoaming = regCodeIsRoaming(regState);
                     mNewRadioTechnology = type;
                     newSS.setRadioTechnology(type);
+                    newSS.setDataState(newGPRSState);
+                    mDataRadioTechnology = mNewRadioTechnology;
+                    Log.d(LOG_TAG, "[EONS] EVENT_POLL_STATE_GPRS newGPRSState ="
+                        + newGPRSState + " , mDataRadioTechnology =" + mDataRadioTechnology + " , mTAC =" + mTAC);
                 break;
 
                 case EVENT_POLL_STATE_OPERATOR:
@@ -641,6 +796,16 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 case EVENT_POLL_STATE_NETWORK_SELECTION_MODE:
                     ints = (int[])ar.result;
                     newSS.setIsManualSelection(ints[0] == 1);
+                    if ((ints[0] == 1) && (!phone.isManualNetSelAllowed())) {
+                        /*
+                         * modem is currently in manual selection but manual
+                         * selection is not allowed in the current mode so
+                         * switch to automatic registration
+                         */
+                        phone.setNetworkSelectionModeAutomatic (null);
+                        Log.i(LOG_TAG,
+                                " Forcing Automatic Network Selection, manual selection is not allowed");
+                    }
                 break;
             }
 
@@ -671,9 +836,8 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     }
 
     private void setSignalStrengthDefaultValues() {
-        // TODO Make a constructor only has boolean gsm as parameter
-        mSignalStrength = new SignalStrength(99, -1, -1, -1, -1, -1, -1,
-                -1, -1, -1, SignalStrength.INVALID_SNR, -1, true);
+        mSignalStrength = new SignalStrength();
+        mSignalStrength.setGsm(true);
     }
 
     /**
@@ -704,20 +868,6 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 mGotCountryCode = false;
                 pollStateDone();
             break;
-
-            case RUIM_NOT_READY:
-            case RUIM_READY:
-            case RUIM_LOCKED_OR_ABSENT:
-            case NV_NOT_READY:
-            case NV_READY:
-                if (DBG) log("Radio Technology Change ongoing, setting SS to off");
-                newSS.setStateOff();
-                newCellLoc.setStateInvalid();
-                setSignalStrengthDefaultValues();
-                mGotCountryCode = false;
-
-                //NOTE: pollStateDone() is not needed in this case
-                break;
 
             default:
                 // Issue all poll-related commands at once
@@ -838,10 +988,17 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
             mNetworkAttachedRegistrants.notifyRegistrants();
         }
 
+        if (mEonsEnabled) {
+            Log.i(LOG_TAG,"Network State Changed, get EONS and update operator name display");
+            updateEons();
+        } else {
+            Log.i(LOG_TAG,"Network State Changed, update operator name display");
+            updateSpnDisplay();
+        }
+
         if (hasChanged) {
             String operatorNumeric;
 
-            updateSpnDisplay();
 
             phone.setSystemProperty(TelephonyProperties.PROPERTY_OPERATOR_ALPHA,
                 ss.getOperatorAlphaLong());
@@ -998,7 +1155,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     }
 
     private void queueNextSignalStrengthPoll() {
-        if (dontPollSignalStrength || (cm.getRadioState().isCdma())) {
+        if (dontPollSignalStrength) {
             // The radio is telling us about signal strength changes
             // we don't have to ask it
             return;
@@ -1013,54 +1170,6 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
 
         // TODO Don't poll signal strength if screen is off
         sendMessageDelayed(msg, POLL_PERIOD_MILLIS);
-    }
-
-    /**
-     *  Send signal-strength-changed notification if changed.
-     *  Called both for solicited and unsolicited signal strength updates.
-     */
-    private void onSignalStrengthResult(AsyncResult ar) {
-        SignalStrength oldSignalStrength = mSignalStrength;
-        int rssi = 99;
-        int lteSignalStrength = -1;
-        int lteRsrp = -1;
-        int lteRsrq = -1;
-        int lteRssnr = SignalStrength.INVALID_SNR;
-        int lteCqi = -1;
-
-        if (ar.exception != null) {
-            // -1 = unknown
-            // most likely radio is resetting/disconnected
-            setSignalStrengthDefaultValues();
-        } else {
-            int[] ints = (int[])ar.result;
-
-            // bug 658816 seems to be a case where the result is 0-length
-            if (ints.length != 0) {
-                rssi = ints[0];
-                lteSignalStrength = ints[7];
-                lteRsrp = ints[8];
-                lteRsrq = ints[9];
-                lteRssnr = ints[10];
-                lteCqi = ints[11];
-            } else {
-                loge("Bogus signal strength response");
-                rssi = 99;
-            }
-        }
-
-        mSignalStrength = new SignalStrength(rssi, -1, -1, -1,
-                -1, -1, -1, lteSignalStrength, lteRsrp, lteRsrq, lteRssnr, lteCqi, true);
-
-        if (!mSignalStrength.equals(oldSignalStrength)) {
-            try { // This takes care of delayed EVENT_POLL_SIGNAL_STRENGTH (scheduled after
-                  // POLL_PERIOD_MILLIS) during Radio Technology Change)
-                phone.notifySignalStrength();
-           } catch (NullPointerException ex) {
-                log("onSignalStrengthResult() Phone already destroyed: " + ex
-                        + "SignalStrength not notified");
-           }
-        }
     }
 
     /**
@@ -1083,7 +1192,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                     ((state & RILConstants.RIL_RESTRICTED_STATE_CS_EMERGENCY) != 0) ||
                     ((state & RILConstants.RIL_RESTRICTED_STATE_CS_ALL) != 0) );
             //ignore the normal call and data restricted state before SIM READY
-            if (phone.getIccCard().getState() == IccCard.State.READY) {
+            if (mUiccApplcation != null && mUiccApplcation.getState() == AppState.APPSTATE_READY) {
                 newRs.setCsNormalRestricted(
                         ((state & RILConstants.RIL_RESTRICTED_STATE_CS_NORMAL) != 0) ||
                         ((state & RILConstants.RIL_RESTRICTED_STATE_CS_ALL) != 0) );
@@ -1195,6 +1304,10 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         return 5 == code;
     }
 
+    public String getSystemProperty(String property, String defValue) {
+        return SystemProperties.get(property, defValue);
+    }
+
     /**
      * Set roaming state when gsmRoaming is true and, if operator mcc is the
      * same as sim mcc, ons is different from spn
@@ -1203,7 +1316,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
      * @return true for roaming state set
      */
     private boolean isRoamingBetweenOperators(boolean gsmRoaming, ServiceState s) {
-        String spn = SystemProperties.get(TelephonyProperties.PROPERTY_ICC_OPERATOR_ALPHA, "empty");
+        String spn = getSystemProperty(TelephonyProperties.PROPERTY_ICC_OPERATOR_ALPHA, "empty");
 
         String onsl = s.getOperatorAlphaLong();
         String onss = s.getOperatorAlphaShort();
@@ -1211,8 +1324,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         boolean equalsOnsl = onsl != null && spn.equals(onsl);
         boolean equalsOnss = onss != null && spn.equals(onss);
 
-        String simNumeric = SystemProperties.get(
-                TelephonyProperties.PROPERTY_ICC_OPERATOR_NUMERIC, "");
+        String simNumeric = getSystemProperty(TelephonyProperties.PROPERTY_ICC_OPERATOR_NUMERIC, "");
         String  operatorNumeric = s.getOperatorNumeric();
 
         boolean equalsMcc = true;
@@ -1360,7 +1472,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                 zone = TimeZone.getTimeZone( tzname );
             }
 
-            String iso = SystemProperties.get(TelephonyProperties.PROPERTY_OPERATOR_ISO_COUNTRY);
+            String iso = getSystemProperty(TelephonyProperties.PROPERTY_OPERATOR_ISO_COUNTRY, null);
 
             if (zone == null) {
 
@@ -1602,6 +1714,41 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         }
     }
 
+    protected UiccCardApplication getUiccCardApplication() {
+        return  mUiccManager.getUiccCardApplication(AppFamily.APP_FAM_3GPP);
+    }
+
+    protected void updateIccAvailability() {
+        if (mUiccManager == null ) {
+            return;
+        }
+
+        UiccCardApplication newUiccApplication = getUiccCardApplication();
+        if (newUiccApplication == null) return;
+
+        if (mUiccApplcation != newUiccApplication) {
+            if (mUiccApplcation != null) {
+                log("Removing stale icc objects.");
+                mUiccApplcation.unregisterForReady(this);
+                if (mIccRecords != null) {
+                    mIccRecords.unregisterForRecordsLoaded(this);
+                    mIccRecords.unregisterForRecordsEvents(this);
+                }
+                mIccRecords = null;
+                mUiccApplcation = null;
+            }
+            if (newUiccApplication != null) {
+                log("New card found");
+                mUiccApplcation = newUiccApplication;
+                mIccRecords = mUiccApplcation.getIccRecords();
+                mUiccApplcation.registerForReady(this, EVENT_SIM_READY, null);
+                if (mIccRecords != null) {
+                    mIccRecords.registerForRecordsLoaded(this, EVENT_SIM_RECORDS_LOADED, null);
+                    mIccRecords.registerForRecordsEvents(this, EVENT_ICC_RECORD_EVENTS, null);
+                }
+            }
+        }
+    }
     @Override
     protected void log(String s) {
         Log.d(LOG_TAG, "[GsmSST] " + s);
@@ -1615,4 +1762,75 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     private static void sloge(String s) {
         Log.e(LOG_TAG, "[GsmSST] " + s);
     }
+
+    /*
+     * Show Managed Roaming dialog if user preferred Network Selection mode is 'Manual'
+     */
+    private void createManagedRoamingDialog() {
+        Resources r = Resources.getSystem();
+        String networkSelection = PreferenceManager.getDefaultSharedPreferences(phone.getContext())
+            .getString(NETWORK_SELECTION_KEY, "");
+
+        Log.i(LOG_TAG, "Managed Roaming case, networkSelection " + networkSelection);
+        // networkSelection will be empty for 'Automatic' mode.
+        if (!TextUtils.isEmpty(networkSelection) && !isManagedRoamingDialogDisplayed) {
+            Log.i(LOG_TAG, "Show Managed Roaming Dialog");
+            AlertDialog managedRoamingDialog = new AlertDialog.Builder(phone.getContext())
+                    .setTitle(r.getString(R.string.managed_roaming_title))
+                    .setMessage(r.getString(R.string.managed_roaming_dialog_content))
+                    .setPositiveButton(r.getString(R.string.managed_roaming_dialog_ok_button),
+                        onManagedRoamingDialogClick)
+                    .setNegativeButton(r.getString(R.string.managed_roaming_dialog_cancel_button),
+                        onManagedRoamingDialogClick)
+                    .create();
+
+            managedRoamingDialog.setOnKeyListener(mManagedRoamingDialogOnKeyListener);
+            isManagedRoamingDialogDisplayed = true;
+            managedRoamingDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_SYSTEM_ALERT);
+            managedRoamingDialog.show();
+        }
+    }
+
+    /**
+     * Get CDMA subscription information if the CDMA device
+     * is registered on 3GPP network and the multimode property
+     * is set to true
+     */
+    private void getSubscriptionInfo() {
+        if (mIsMultimodeCdmaPhone) {
+            cm.getCDMASubscription(obtainMessage(EVENT_POLL_STATE_CDMA_SUBSCRIPTION));
+        }
+    }
+
+    DialogInterface.OnClickListener onManagedRoamingDialogClick =
+        new DialogInterface.OnClickListener() {
+        public void onClick(DialogInterface dialog, int which) {
+            dialog.dismiss();
+            switch (which) {
+                case DialogInterface.BUTTON_POSITIVE:
+                    Intent networkSettingIntent = new Intent(Intent.ACTION_MAIN);
+                    networkSettingIntent.setClassName("com.android.phone",
+                            "com.android.phone.NetworkSetting");
+                    networkSettingIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    phone.getContext().startActivity(networkSettingIntent);
+                    break;
+
+                case DialogInterface.BUTTON_NEGATIVE:
+                    break;
+            }
+            isManagedRoamingDialogDisplayed = false;
+        }
+    };
+
+    DialogInterface.OnKeyListener mManagedRoamingDialogOnKeyListener =
+        new DialogInterface.OnKeyListener() {
+        public boolean onKey(DialogInterface dialog, int keyCode, KeyEvent event) {
+            // Handle the back key to reset the global variable.
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                isManagedRoamingDialogDisplayed = false;
+            }
+            return false;
+        }
+    };
+
 }

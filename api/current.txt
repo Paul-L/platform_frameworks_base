@@ -1316,6 +1316,8 @@ package android {
     field public static final int stat_notify_sync = 17301628; // 0x108007c
     field public static final int stat_notify_sync_noanim = 17301629; // 0x108007d
     field public static final int stat_notify_voicemail = 17301630; // 0x108007e
+    field public static final int stat_notify_voicemail_sub1 = 17301662; // 0x108009e
+    field public static final int stat_notify_voicemail_sub2 = 17301663; // 0x108009f
     field public static final int stat_sys_data_bluetooth = 17301632; // 0x1080080
     field public static final int stat_sys_download = 17301633; // 0x1080081
     field public static final int stat_sys_download_done = 17301634; // 0x1080082
@@ -4425,6 +4427,10 @@ package android.bluetooth {
     field public static final int HEALTH_THERMOMETER = 2312; // 0x908
     field public static final int HEALTH_UNCATEGORIZED = 2304; // 0x900
     field public static final int HEALTH_WEIGHING = 2316; // 0x90c
+    field public static final int IMAGING_CAMERA = 1568; // 0x620
+    field public static final int IMAGING_DISPLAY = 1552; // 0x610
+    field public static final int IMAGING_PRINTER = 1664; // 0x680
+    field public static final int IMAGING_SCANNER = 1600; // 0x640
     field public static final int PHONE_CELLULAR = 516; // 0x204
     field public static final int PHONE_CORDLESS = 520; // 0x208
     field public static final int PHONE_ISDN = 532; // 0x214
@@ -4601,6 +4607,35 @@ package android.bluetooth {
     method public java.io.OutputStream getOutputStream() throws java.io.IOException;
     method public android.bluetooth.BluetoothDevice getRemoteDevice();
     method public boolean isConnected();
+  }
+
+  public abstract interface IBluetoothThermometerCallBack implements android.os.IInterface {
+    method public abstract void sendResult(android.os.Bundle) throws android.os.RemoteException;
+  }
+
+  public static abstract class IBluetoothThermometerCallBack.Stub extends android.os.Binder implements android.bluetooth.IBluetoothThermometerCallBack {
+    ctor public IBluetoothThermometerCallBack.Stub();
+    method public android.os.IBinder asBinder();
+    method public static android.bluetooth.IBluetoothThermometerCallBack asInterface(android.os.IBinder);
+    method public boolean onTransact(int, android.os.Parcel, android.os.Parcel, int) throws android.os.RemoteException;
+  }
+
+  public abstract interface IBluetoothThermometerServices implements android.os.IInterface {
+    method public abstract boolean clearNotifyIndicate(android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract boolean closeThermometerService(android.bluetooth.BluetoothDevice, android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract java.lang.String getServiceName(android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract boolean notifyIndicateValue(android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract void readCharacteristicsValue(android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract int readClientCharConf(android.os.ParcelUuid) throws android.os.RemoteException;
+    method public abstract boolean startThermometerService(android.bluetooth.BluetoothDevice, android.os.ParcelUuid, android.bluetooth.IBluetoothThermometerCallBack) throws android.os.RemoteException;
+    method public abstract boolean writeCharacteristicsValue(android.os.ParcelUuid, java.lang.String) throws android.os.RemoteException;
+  }
+
+  public static abstract class IBluetoothThermometerServices.Stub extends android.os.Binder implements android.bluetooth.IBluetoothThermometerServices {
+    ctor public IBluetoothThermometerServices.Stub();
+    method public android.os.IBinder asBinder();
+    method public static android.bluetooth.IBluetoothThermometerServices asInterface(android.os.IBinder);
+    method public boolean onTransact(int, android.os.Parcel, android.os.Parcel, int) throws android.os.RemoteException;
   }
 
 }
@@ -5118,6 +5153,7 @@ package android.content {
     field public static final int MODE_PRIVATE = 0; // 0x0
     field public static final int MODE_WORLD_READABLE = 1; // 0x1
     field public static final int MODE_WORLD_WRITEABLE = 2; // 0x2
+    field public static final java.lang.String MSIM_TELEPHONY_SERVICE = "phone_msim";
     field public static final java.lang.String NFC_SERVICE = "nfc";
     field public static final java.lang.String NOTIFICATION_SERVICE = "notification";
     field public static final java.lang.String POWER_SERVICE = "power";
@@ -5435,6 +5471,8 @@ package android.content {
     field public static final java.lang.String ACTION_EXTERNAL_APPLICATIONS_AVAILABLE = "android.intent.action.EXTERNAL_APPLICATIONS_AVAILABLE";
     field public static final java.lang.String ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE = "android.intent.action.EXTERNAL_APPLICATIONS_UNAVAILABLE";
     field public static final java.lang.String ACTION_FACTORY_TEST = "android.intent.action.FACTORY_TEST";
+    field public static final java.lang.String ACTION_FM = "android.intent.action.FM";
+    field public static final java.lang.String ACTION_FM_TX = "android.intent.action.FMTX";
     field public static final java.lang.String ACTION_GET_CONTENT = "android.intent.action.GET_CONTENT";
     field public static final java.lang.String ACTION_GTALK_SERVICE_CONNECTED = "android.intent.action.GTALK_CONNECTED";
     field public static final java.lang.String ACTION_GTALK_SERVICE_DISCONNECTED = "android.intent.action.GTALK_DISCONNECTED";
@@ -5504,6 +5542,8 @@ package android.content {
     field public static final java.lang.String ACTION_VOICE_COMMAND = "android.intent.action.VOICE_COMMAND";
     field public static final java.lang.String ACTION_WALLPAPER_CHANGED = "android.intent.action.WALLPAPER_CHANGED";
     field public static final java.lang.String ACTION_WEB_SEARCH = "android.intent.action.WEB_SEARCH";
+    field public static final java.lang.String ACTION_WIFI_DISPLAY = "android.intent.action.WIFI_DISPLAY";
+    field public static final java.lang.String ACTION_WIFI_DISPLAY_VIDEO = "android.intent.action.WIFI_DISPLAY_VIDEO";
     field public static final java.lang.String CATEGORY_ALTERNATIVE = "android.intent.category.ALTERNATIVE";
     field public static final java.lang.String CATEGORY_APP_BROWSER = "android.intent.category.APP_BROWSER";
     field public static final java.lang.String CATEGORY_APP_CALCULATOR = "android.intent.category.APP_CALCULATOR";
@@ -6534,6 +6574,8 @@ package android.content.res {
     field public static final int NAVIGATION_WHEEL = 4; // 0x4
     field public static final int ORIENTATION_LANDSCAPE = 2; // 0x2
     field public static final int ORIENTATION_PORTRAIT = 1; // 0x1
+    field public static final int ORIENTATION_REVERSE_LANDSCAPE = 5; // 0x5
+    field public static final int ORIENTATION_REVERSE_PORTRAIT = 4; // 0x4
     field public static final int ORIENTATION_SQUARE = 3; // 0x3
     field public static final int ORIENTATION_UNDEFINED = 0; // 0x0
     field public static final int SCREENLAYOUT_LONG_MASK = 48; // 0x30
@@ -6563,6 +6605,7 @@ package android.content.res {
     field public static final int UI_MODE_TYPE_NORMAL = 1; // 0x1
     field public static final int UI_MODE_TYPE_TELEVISION = 4; // 0x4
     field public static final int UI_MODE_TYPE_UNDEFINED = 0; // 0x0
+    field public int altOrientation;
     field public float fontScale;
     field public int hardKeyboardHidden;
     field public int keyboard;
@@ -9267,6 +9310,7 @@ package android.hardware {
     method public final void addCallbackBuffer(byte[]);
     method public final void autoFocus(android.hardware.Camera.AutoFocusCallback);
     method public final void cancelAutoFocus();
+    method public final void encodeData();
     method public static void getCameraInfo(int, android.hardware.Camera.CameraInfo);
     method public static int getNumberOfCameras();
     method public android.hardware.Camera.Parameters getParameters();
@@ -9275,9 +9319,13 @@ package android.hardware {
     method public static android.hardware.Camera open();
     method public final void reconnect() throws java.io.IOException;
     method public final void release();
+    method public final void sendHistogramData();
+    method public final void sendMetaData();
     method public final void setDisplayOrientation(int);
     method public final void setErrorCallback(android.hardware.Camera.ErrorCallback);
+    method public final void setFaceDetectionCb(android.hardware.Camera.CameraMetaDataCallback);
     method public final void setFaceDetectionListener(android.hardware.Camera.FaceDetectionListener);
+    method public final void setHistogramMode(android.hardware.Camera.CameraDataCallback);
     method public final void setOneShotPreviewCallback(android.hardware.Camera.PreviewCallback);
     method public void setParameters(android.hardware.Camera.Parameters);
     method public final void setPreviewCallback(android.hardware.Camera.PreviewCallback);
@@ -9310,12 +9358,28 @@ package android.hardware {
     method public abstract void onAutoFocus(boolean, android.hardware.Camera);
   }
 
+  public static abstract interface Camera.CameraDataCallback {
+    method public abstract void onCameraData(int[], android.hardware.Camera);
+  }
+
   public static class Camera.CameraInfo {
     ctor public Camera.CameraInfo();
     field public static final int CAMERA_FACING_BACK = 0; // 0x0
     field public static final int CAMERA_FACING_FRONT = 1; // 0x1
+    field public static final int CAMERA_SUPPORT_MODE_NONZSL = 3; // 0x3
+    field public static final int CAMERA_SUPPORT_MODE_ZSL = 2; // 0x2
     field public int facing;
     field public int orientation;
+  }
+
+  public static abstract interface Camera.CameraMetaDataCallback {
+    method public abstract void onCameraMetaData(int[], android.hardware.Camera);
+  }
+
+  public class Camera.Coordinate {
+    ctor public Camera.Coordinate(int, int);
+    field public int xCoordinate;
+    field public int yCoordinate;
   }
 
   public static abstract interface Camera.ErrorCallback {
@@ -9343,58 +9407,101 @@ package android.hardware {
   public class Camera.Parameters {
     method public java.lang.String flatten();
     method public java.lang.String get(java.lang.String);
+    method public java.lang.String getAEBracket();
     method public java.lang.String getAntibanding();
+    method public java.lang.String getAutoExposure();
     method public boolean getAutoExposureLock();
     method public boolean getAutoWhiteBalanceLock();
+    method public java.lang.String getCameraMode();
     method public java.lang.String getColorEffect();
+    method public java.lang.String getContinuousAf();
+    method public int getContrast();
+    method public java.lang.String getDenoise();
     method public int getExposureCompensation();
     method public float getExposureCompensationStep();
+    method public java.lang.String getFaceDetectionMode();
     method public java.lang.String getFlashMode();
     method public float getFocalLength();
     method public java.util.List<android.hardware.Camera.Area> getFocusAreas();
     method public void getFocusDistances(float[]);
     method public java.lang.String getFocusMode();
     method public float getHorizontalViewAngle();
+    method public java.lang.String getISOValue();
     method public int getInt(java.lang.String);
     method public int getJpegQuality();
     method public int getJpegThumbnailQuality();
     method public android.hardware.Camera.Size getJpegThumbnailSize();
+    method public java.lang.String getLensShade();
+    method public int getMaxContrast();
     method public int getMaxExposureCompensation();
     method public int getMaxNumDetectedFaces();
     method public int getMaxNumFocusAreas();
     method public int getMaxNumMeteringAreas();
+    method public int getMaxSaturation();
+    method public int getMaxSharpness();
     method public int getMaxZoom();
+    method public java.lang.String getMemColorEnhance();
     method public java.util.List<android.hardware.Camera.Area> getMeteringAreas();
     method public int getMinExposureCompensation();
     method public int getPictureFormat();
     method public android.hardware.Camera.Size getPictureSize();
+    method public java.lang.String getPowerMode();
     method public android.hardware.Camera.Size getPreferredPreviewSizeForVideo();
     method public int getPreviewFormat();
     method public void getPreviewFpsRange(int[]);
     method public deprecated int getPreviewFrameRate();
+    method public java.lang.String getPreviewFrameRateMode();
     method public android.hardware.Camera.Size getPreviewSize();
+    method public java.lang.String getRedeyeReductionMode();
+    method public int getSaturation();
+    method public java.lang.String getSceneDetectMode();
     method public java.lang.String getSceneMode();
+    method public java.lang.String getSelectableZoneAf();
+    method public int getSharpness();
     method public java.util.List<java.lang.String> getSupportedAntibanding();
+    method public java.util.List<java.lang.String> getSupportedAutoexposure();
     method public java.util.List<java.lang.String> getSupportedColorEffects();
+    method public java.util.List<java.lang.String> getSupportedContinuousAfModes();
+    method public java.util.List<java.lang.String> getSupportedDenoiseModes();
+    method public java.util.List<java.lang.String> getSupportedFaceDetectionModes();
     method public java.util.List<java.lang.String> getSupportedFlashModes();
     method public java.util.List<java.lang.String> getSupportedFocusModes();
+    method public java.util.List<android.hardware.Camera.Size> getSupportedHfrSizes();
+    method public java.util.List<java.lang.String> getSupportedHistogramModes();
+    method public java.util.List<java.lang.String> getSupportedIsoValues();
     method public java.util.List<android.hardware.Camera.Size> getSupportedJpegThumbnailSizes();
+    method public java.util.List<java.lang.String> getSupportedLensShadeModes();
+    method public java.util.List<java.lang.String> getSupportedMemColorEnhanceModes();
     method public java.util.List<java.lang.Integer> getSupportedPictureFormats();
     method public java.util.List<android.hardware.Camera.Size> getSupportedPictureSizes();
     method public java.util.List<java.lang.Integer> getSupportedPreviewFormats();
     method public java.util.List<int[]> getSupportedPreviewFpsRange();
+    method public java.util.List<java.lang.String> getSupportedPreviewFrameRateModes();
     method public deprecated java.util.List<java.lang.Integer> getSupportedPreviewFrameRates();
     method public java.util.List<android.hardware.Camera.Size> getSupportedPreviewSizes();
+    method public java.util.List<java.lang.String> getSupportedRedeyeReductionModes();
+    method public java.util.List<java.lang.String> getSupportedSceneDetectModes();
     method public java.util.List<java.lang.String> getSupportedSceneModes();
+    method public java.util.List<java.lang.String> getSupportedSelectableZoneAf();
+    method public java.util.List<java.lang.String> getSupportedSkinToneEnhancementModes();
+    method public java.util.List<java.lang.String> getSupportedTouchAfAec();
+    method public java.util.List<java.lang.String> getSupportedVideoHighFrameRateModes();
     method public java.util.List<android.hardware.Camera.Size> getSupportedVideoSizes();
     method public java.util.List<java.lang.String> getSupportedWhiteBalance();
+    method public java.util.List<java.lang.String> getSupportedZSLModes();
+    method public java.lang.String getTouchAfAec();
+    method public android.hardware.Camera.Coordinate getTouchIndexAec();
+    method public android.hardware.Camera.Coordinate getTouchIndexAf();
     method public float getVerticalViewAngle();
+    method public java.lang.String getVideoHighFrameRate();
     method public boolean getVideoStabilization();
     method public java.lang.String getWhiteBalance();
+    method public java.lang.String getZSLMode();
     method public int getZoom();
     method public java.util.List<java.lang.Integer> getZoomRatios();
     method public boolean isAutoExposureLockSupported();
     method public boolean isAutoWhiteBalanceLockSupported();
+    method public boolean isPowerModeSupported();
     method public boolean isSmoothZoomSupported();
     method public boolean isVideoSnapshotSupported();
     method public boolean isVideoStabilizationSupported();
@@ -9403,40 +9510,77 @@ package android.hardware {
     method public void removeGpsData();
     method public void set(java.lang.String, java.lang.String);
     method public void set(java.lang.String, int);
+    method public void setAEBracket(java.lang.String);
     method public void setAntibanding(java.lang.String);
+    method public void setAutoExposure(java.lang.String);
     method public void setAutoExposureLock(boolean);
     method public void setAutoWhiteBalanceLock(boolean);
+    method public void setCameraMode(int);
     method public void setColorEffect(java.lang.String);
+    method public void setContinuousAf(java.lang.String);
+    method public void setContrast(int);
+    method public void setDenoise(java.lang.String);
+    method public void setExifDateTime(java.lang.String);
     method public void setExposureCompensation(int);
+    method public void setFaceDetectionMode(java.lang.String);
     method public void setFlashMode(java.lang.String);
     method public void setFocusAreas(java.util.List<android.hardware.Camera.Area>);
     method public void setFocusMode(java.lang.String);
     method public void setGpsAltitude(double);
+    method public void setGpsAltitudeRef(double);
     method public void setGpsLatitude(double);
+    method public void setGpsLatitudeRef(java.lang.String);
     method public void setGpsLongitude(double);
+    method public void setGpsLongitudeRef(java.lang.String);
     method public void setGpsProcessingMethod(java.lang.String);
+    method public void setGpsStatus(double);
     method public void setGpsTimestamp(long);
+    method public void setISOValue(java.lang.String);
     method public void setJpegQuality(int);
     method public void setJpegThumbnailQuality(int);
     method public void setJpegThumbnailSize(int, int);
+    method public void setLensShade(java.lang.String);
+    method public void setMemColorEnhance(java.lang.String);
     method public void setMeteringAreas(java.util.List<android.hardware.Camera.Area>);
     method public void setPictureFormat(int);
     method public void setPictureSize(int, int);
+    method public void setPowerMode(java.lang.String);
     method public void setPreviewFormat(int);
     method public void setPreviewFpsRange(int, int);
     method public deprecated void setPreviewFrameRate(int);
+    method public void setPreviewFrameRateMode(java.lang.String);
     method public void setPreviewSize(int, int);
     method public void setRecordingHint(boolean);
+    method public void setRedeyeReductionMode(java.lang.String);
     method public void setRotation(int);
+    method public void setSaturation(int);
+    method public void setSceneDetectMode(java.lang.String);
     method public void setSceneMode(java.lang.String);
+    method public void setSelectableZoneAf(java.lang.String);
+    method public void setSharpness(int);
+    method public void setTouchAfAec(java.lang.String);
+    method public void setTouchIndexAec(int, int);
+    method public void setTouchIndexAf(int, int);
+    method public void setVideoHighFrameRate(java.lang.String);
     method public void setVideoStabilization(boolean);
     method public void setWhiteBalance(java.lang.String);
+    method public void setZSLMode(java.lang.String);
     method public void setZoom(int);
     method public void unflatten(java.lang.String);
+    field public static final java.lang.String AE_BRACKET = "AE-Bracket";
+    field public static final java.lang.String AE_BRACKET_HDR = "HDR";
+    field public static final java.lang.String AE_BRACKET_HDR_OFF = "Off";
     field public static final java.lang.String ANTIBANDING_50HZ = "50hz";
     field public static final java.lang.String ANTIBANDING_60HZ = "60hz";
     field public static final java.lang.String ANTIBANDING_AUTO = "auto";
     field public static final java.lang.String ANTIBANDING_OFF = "off";
+    field public static final java.lang.String AUTO_EXPOSURE_CENTER_WEIGHTED = "center-weighted";
+    field public static final java.lang.String AUTO_EXPOSURE_FRAME_AVG = "frame-average";
+    field public static final java.lang.String AUTO_EXPOSURE_SPOT_METERING = "spot-metering";
+    field public static final java.lang.String CONTINUOUS_AF_OFF = "caf-off";
+    field public static final java.lang.String CONTINUOUS_AF_ON = "caf-on";
+    field public static final java.lang.String DENOISE_OFF = "denoise-off";
+    field public static final java.lang.String DENOISE_ON = "denoise-on";
     field public static final java.lang.String EFFECT_AQUA = "aqua";
     field public static final java.lang.String EFFECT_BLACKBOARD = "blackboard";
     field public static final java.lang.String EFFECT_MONO = "mono";
@@ -9446,6 +9590,8 @@ package android.hardware {
     field public static final java.lang.String EFFECT_SEPIA = "sepia";
     field public static final java.lang.String EFFECT_SOLARIZE = "solarize";
     field public static final java.lang.String EFFECT_WHITEBOARD = "whiteboard";
+    field public static final java.lang.String FACE_DETECTION_OFF = "off";
+    field public static final java.lang.String FACE_DETECTION_ON = "on";
     field public static final java.lang.String FLASH_MODE_AUTO = "auto";
     field public static final java.lang.String FLASH_MODE_OFF = "off";
     field public static final java.lang.String FLASH_MODE_ON = "on";
@@ -9461,14 +9607,38 @@ package android.hardware {
     field public static final java.lang.String FOCUS_MODE_FIXED = "fixed";
     field public static final java.lang.String FOCUS_MODE_INFINITY = "infinity";
     field public static final java.lang.String FOCUS_MODE_MACRO = "macro";
+    field public static final java.lang.String FOCUS_MODE_NORMAL = "normal";
+    field public static final java.lang.String HISTOGRAM_DISABLE = "disable";
+    field public static final java.lang.String HISTOGRAM_ENABLE = "enable";
+    field public static final java.lang.String ISO_100 = "ISO100";
+    field public static final java.lang.String ISO_1600 = "ISO1600";
+    field public static final java.lang.String ISO_200 = "ISO200";
+    field public static final java.lang.String ISO_400 = "ISO400";
+    field public static final java.lang.String ISO_800 = "ISO800";
+    field public static final java.lang.String ISO_AUTO = "auto";
+    field public static final java.lang.String ISO_HJR = "ISO_HJR";
+    field public static final java.lang.String KEY_AE_BRACKET_HDR = "ae-bracket-hdr";
+    field public static final java.lang.String LENSSHADE_DISABLE = "disable";
+    field public static final java.lang.String LENSSHADE_ENABLE = "enable";
+    field public static final java.lang.String LOW_POWER = "Low_Power";
+    field public static final java.lang.String MCE_DISABLE = "disable";
+    field public static final java.lang.String MCE_ENABLE = "enable";
+    field public static final java.lang.String NORMAL_POWER = "Normal_Power";
     field public static final int PREVIEW_FPS_MAX_INDEX = 1; // 0x1
     field public static final int PREVIEW_FPS_MIN_INDEX = 0; // 0x0
+    field public static final java.lang.String REDEYE_REDUCTION_DISABLE = "disable";
+    field public static final java.lang.String REDEYE_REDUCTION_ENABLE = "enable";
+    field public static final java.lang.String SCENE_DETECT_OFF = "off";
+    field public static final java.lang.String SCENE_DETECT_ON = "on";
     field public static final java.lang.String SCENE_MODE_ACTION = "action";
+    field public static final java.lang.String SCENE_MODE_ASD = "asd";
     field public static final java.lang.String SCENE_MODE_AUTO = "auto";
+    field public static final java.lang.String SCENE_MODE_BACKLIGHT = "backlight";
     field public static final java.lang.String SCENE_MODE_BARCODE = "barcode";
     field public static final java.lang.String SCENE_MODE_BEACH = "beach";
     field public static final java.lang.String SCENE_MODE_CANDLELIGHT = "candlelight";
     field public static final java.lang.String SCENE_MODE_FIREWORKS = "fireworks";
+    field public static final java.lang.String SCENE_MODE_FLOWERS = "flowers";
     field public static final java.lang.String SCENE_MODE_LANDSCAPE = "landscape";
     field public static final java.lang.String SCENE_MODE_NIGHT = "night";
     field public static final java.lang.String SCENE_MODE_NIGHT_PORTRAIT = "night-portrait";
@@ -9479,6 +9649,18 @@ package android.hardware {
     field public static final java.lang.String SCENE_MODE_STEADYPHOTO = "steadyphoto";
     field public static final java.lang.String SCENE_MODE_SUNSET = "sunset";
     field public static final java.lang.String SCENE_MODE_THEATRE = "theatre";
+    field public static final java.lang.String SELECTABLE_ZONE_AF_AUTO = "auto";
+    field public static final java.lang.String SELECTABLE_ZONE_AF_CENTER_WEIGHTED = "center-weighted";
+    field public static final java.lang.String SELECTABLE_ZONE_AF_FRAME_AVERAGE = "frame-average";
+    field public static final java.lang.String SELECTABLE_ZONE_AF_SPOTMETERING = "spot-metering";
+    field public static final java.lang.String SKIN_TONE_ENHANCEMENT_DISABLE = "disable";
+    field public static final java.lang.String SKIN_TONE_ENHANCEMENT_ENABLE = "enable";
+    field public static final java.lang.String TOUCH_AF_AEC_OFF = "touch-off";
+    field public static final java.lang.String TOUCH_AF_AEC_ON = "touch-on";
+    field public static final java.lang.String VIDEO_HFR_2X = "60";
+    field public static final java.lang.String VIDEO_HFR_3X = "90";
+    field public static final java.lang.String VIDEO_HFR_4X = "120";
+    field public static final java.lang.String VIDEO_HFR_OFF = "off";
     field public static final java.lang.String WHITE_BALANCE_AUTO = "auto";
     field public static final java.lang.String WHITE_BALANCE_CLOUDY_DAYLIGHT = "cloudy-daylight";
     field public static final java.lang.String WHITE_BALANCE_DAYLIGHT = "daylight";
@@ -9487,6 +9669,8 @@ package android.hardware {
     field public static final java.lang.String WHITE_BALANCE_SHADE = "shade";
     field public static final java.lang.String WHITE_BALANCE_TWILIGHT = "twilight";
     field public static final java.lang.String WHITE_BALANCE_WARM_FLUORESCENT = "warm-fluorescent";
+    field public static final java.lang.String ZSL_OFF = "off";
+    field public static final java.lang.String ZSL_ON = "on";
   }
 
   public static abstract interface Camera.PictureCallback {
@@ -10354,6 +10538,7 @@ package android.media {
     method public boolean isBluetoothA2dpOn();
     method public boolean isBluetoothScoAvailableOffCall();
     method public boolean isBluetoothScoOn();
+    method public boolean isFMActive();
     method public boolean isMicrophoneMute();
     method public boolean isMusicActive();
     method public boolean isSpeakerphoneOn();
@@ -10562,6 +10747,7 @@ package android.media {
     field public static final int QUALITY_480P = 4; // 0x4
     field public static final int QUALITY_720P = 5; // 0x5
     field public static final int QUALITY_CIF = 3; // 0x3
+    field public static final int QUALITY_FWVGA = 8; // 0x8
     field public static final int QUALITY_HIGH = 1; // 0x1
     field public static final int QUALITY_LOW = 0; // 0x0
     field public static final int QUALITY_QCIF = 2; // 0x2
@@ -10574,6 +10760,9 @@ package android.media {
     field public static final int QUALITY_TIME_LAPSE_LOW = 1000; // 0x3e8
     field public static final int QUALITY_TIME_LAPSE_QCIF = 1002; // 0x3ea
     field public static final int QUALITY_TIME_LAPSE_QVGA = 1007; // 0x3ef
+    field public static final int QUALITY_VGA = 10; // 0xa
+    field public static final int QUALITY_WQVGA = 11; // 0xb
+    field public static final int QUALITY_WVGA = 9; // 0x9
     field public int audioBitRate;
     field public int audioChannels;
     field public int audioCodec;
@@ -10769,6 +10958,7 @@ package android.media {
     method public void setWakeMode(android.content.Context, int);
     method public void start() throws java.lang.IllegalStateException;
     method public void stop() throws java.lang.IllegalStateException;
+    field public static final int KEY_PARAMETER_3D_ATTRIBUTES = 8001; // 0x1f41
     field public static final int MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK = 200; // 0xc8
     field public static final int MEDIA_ERROR_SERVER_DIED = 100; // 0x64
     field public static final int MEDIA_ERROR_UNKNOWN = 1; // 0x1
@@ -10813,6 +11003,8 @@ package android.media {
     ctor public MediaRecorder();
     method public static final int getAudioSourceMax();
     method public int getMaxAmplitude() throws java.lang.IllegalStateException;
+    method public void native_start() throws java.lang.IllegalStateException;
+    method public void native_stop() throws java.lang.IllegalStateException;
     method public void prepare() throws java.io.IOException, java.lang.IllegalStateException;
     method public void release();
     method public void reset();
@@ -10851,14 +11043,20 @@ package android.media {
 
   public final class MediaRecorder.AudioEncoder {
     field public static final int AAC = 3; // 0x3
+    field public static final int AAC_PLUS = 4; // 0x4
     field public static final int AMR_NB = 1; // 0x1
     field public static final int AMR_WB = 2; // 0x2
     field public static final int DEFAULT = 0; // 0x0
+    field public static final int EAAC_PLUS = 5; // 0x5
+    field public static final int EVRC = 6; // 0x6
+    field public static final int QCELP = 7; // 0x7
   }
 
   public final class MediaRecorder.AudioSource {
     field public static final int CAMCORDER = 5; // 0x5
     field public static final int DEFAULT = 0; // 0x0
+    field public static final int FM_RX = 8; // 0x8
+    field public static final int FM_RX_A2DP = 9; // 0x9
     field public static final int MIC = 1; // 0x1
     field public static final int VOICE_CALL = 4; // 0x4
     field public static final int VOICE_COMMUNICATION = 7; // 0x7
@@ -10880,8 +11078,10 @@ package android.media {
     field public static final int AMR_WB = 4; // 0x4
     field public static final int DEFAULT = 0; // 0x0
     field public static final int MPEG_4 = 2; // 0x2
+    field public static final int QCP = 9; // 0x9
     field public static final int RAW_AMR = 3; // 0x3
     field public static final int THREE_GPP = 1; // 0x1
+    field public static final int THREE_GPP2 = 10; // 0xa
   }
 
   public final class MediaRecorder.VideoEncoder {
@@ -12489,6 +12689,42 @@ package android.net.wifi {
 
 package android.net.wifi.p2p {
 
+  public class WfdInfo implements android.os.Parcelable {
+    ctor public WfdInfo();
+    ctor public WfdInfo(android.net.wifi.p2p.WfdInfo);
+    method public int describeContents();
+    method public boolean isWFDDevice();
+    method public void writeToParcel(android.os.Parcel, int);
+    field public static final int COUPLED = 1; // 0x1
+    field public static final android.os.Parcelable.Creator CREATOR;
+    field public static final int DEFAULT_SESSION_MGMT_CTRL_PORT = 554; // 0x22a
+    field public static final int DEVICETYPE_INVALID = 4; // 0x4
+    field public static final int DEVICETYPE_PRIMARYSINK = 1; // 0x1
+    field public static final int DEVICETYPE_SECONDARYSINK = 2; // 0x2
+    field public static final int DEVICETYPE_SOURCE = 0; // 0x0
+    field public static final int DEVICETYPE_SOURCE_PRIMARYSINK = 3; // 0x3
+    field public static final int NOT_COUPLED_AVAILABLE = 0; // 0x0
+    field public static final int PC_P2P = 0; // 0x0
+    field public static final int PC_TDLS = 1; // 0x1
+    field public static final int TEARDOWN_COUPLING = 2; // 0x2
+    field public java.lang.String coupledDeviceAdress;
+    field public int coupledSinkStatus;
+    field public int deviceType;
+    field public boolean isAudioOnlySupportedAtSource;
+    field public boolean isAudioUnspportedAtPrimarySink;
+    field public boolean isAvailableForSession;
+    field public boolean isContentProtectionSupported;
+    field public boolean isCoupledSinkSupportedBySink;
+    field public boolean isCoupledSinkSupportedBySource;
+    field public boolean isServiceDiscoverySupported;
+    field public boolean isTDLSPersistentGroupIntended;
+    field public boolean isTDLSReInvokePersistentGroupReq;
+    field public boolean isTimeSynchronizationSupported;
+    field public int maxThroughput;
+    field public int preferredConnectivity;
+    field public int sessionMgmtCtrlPort;
+  }
+
   public class WifiP2pConfig implements android.os.Parcelable {
     ctor public WifiP2pConfig();
     ctor public WifiP2pConfig(android.net.wifi.p2p.WifiP2pConfig);
@@ -12521,6 +12757,7 @@ package android.net.wifi.p2p {
     field public java.lang.String primaryDeviceType;
     field public java.lang.String secondaryDeviceType;
     field public int status;
+    field public android.net.wifi.p2p.WfdInfo wfdInfo;
   }
 
   public class WifiP2pDeviceList implements android.os.Parcelable {
@@ -12567,6 +12804,7 @@ package android.net.wifi.p2p {
     method public void requestConnectionInfo(android.net.wifi.p2p.WifiP2pManager.Channel, android.net.wifi.p2p.WifiP2pManager.ConnectionInfoListener);
     method public void requestGroupInfo(android.net.wifi.p2p.WifiP2pManager.Channel, android.net.wifi.p2p.WifiP2pManager.GroupInfoListener);
     method public void requestPeers(android.net.wifi.p2p.WifiP2pManager.Channel, android.net.wifi.p2p.WifiP2pManager.PeerListListener);
+    method public void updateWFDInfo(android.net.wifi.p2p.WifiP2pManager.Channel, android.net.wifi.p2p.WfdInfo, android.net.wifi.p2p.WifiP2pManager.ActionListener);
     field public static final int BUSY = 2; // 0x2
     field public static final int ERROR = 0; // 0x0
     field public static final java.lang.String EXTRA_NETWORK_INFO = "networkInfo";
@@ -12604,6 +12842,10 @@ package android.net.wifi.p2p {
 
   public static abstract interface WifiP2pManager.PeerListListener {
     method public abstract void onPeersAvailable(android.net.wifi.p2p.WifiP2pDeviceList);
+  }
+
+  public static abstract interface WifiP2pManager.StringResponseListener {
+    method public abstract void onResponseAvailable(java.lang.String);
   }
 
 }
@@ -17424,6 +17666,7 @@ package android.provider {
     method public static float getFloat(android.content.ContentResolver, java.lang.String) throws android.provider.Settings.SettingNotFoundException;
     method public static int getInt(android.content.ContentResolver, java.lang.String, int);
     method public static int getInt(android.content.ContentResolver, java.lang.String) throws android.provider.Settings.SettingNotFoundException;
+    method public static int getIntAtIndex(android.content.ContentResolver, java.lang.String, int) throws android.provider.Settings.SettingNotFoundException;
     method public static long getLong(android.content.ContentResolver, java.lang.String, long);
     method public static long getLong(android.content.ContentResolver, java.lang.String) throws android.provider.Settings.SettingNotFoundException;
     method public static synchronized java.lang.String getString(android.content.ContentResolver, java.lang.String);
@@ -17431,6 +17674,7 @@ package android.provider {
     method public static final boolean isLocationProviderEnabled(android.content.ContentResolver, java.lang.String);
     method public static boolean putFloat(android.content.ContentResolver, java.lang.String, float);
     method public static boolean putInt(android.content.ContentResolver, java.lang.String, int);
+    method public static boolean putIntAtIndex(android.content.ContentResolver, java.lang.String, int, int);
     method public static boolean putLong(android.content.ContentResolver, java.lang.String, long);
     method public static boolean putString(android.content.ContentResolver, java.lang.String, java.lang.String);
     method public static final void setLocationProviderEnabled(android.content.ContentResolver, java.lang.String, boolean);
@@ -17539,6 +17783,7 @@ package android.provider {
     field public static final deprecated java.lang.String DEVICE_PROVISIONED = "device_provisioned";
     field public static final java.lang.String DIM_SCREEN = "dim_screen";
     field public static final java.lang.String DTMF_TONE_WHEN_DIALING = "dtmf_tone";
+    field public static final java.lang.String DUMMY_STRING_FOR_PADDING = "";
     field public static final java.lang.String END_BUTTON_BEHAVIOR = "end_button_behavior";
     field public static final java.lang.String FONT_SCALE = "font_scale";
     field public static final java.lang.String HAPTIC_FEEDBACK_ENABLED = "haptic_feedback_enabled";
@@ -17551,6 +17796,10 @@ package android.provider {
     field public static final deprecated java.lang.String LOGGING_ID = "logging_id";
     field public static final java.lang.String MODE_RINGER = "mode_ringer";
     field public static final java.lang.String MODE_RINGER_STREAMS_AFFECTED = "mode_ringer_streams_affected";
+    field public static final java.lang.String MULTI_SIM_DATA_CALL_SUBSCRIPTION = "multi_sim_data_call";
+    field public static final java.lang.String MULTI_SIM_SMS_SUBSCRIPTION = "multi_sim_sms";
+    field public static final java.lang.String MULTI_SIM_VOICE_CALL_SUBSCRIPTION = "multi_sim_voice_call";
+    field public static final java.lang.String MULTI_SIM_VOICE_PROMPT = "multi_sim_voice_prompt";
     field public static final java.lang.String MUTE_STREAMS_AFFECTED = "mute_streams_affected";
     field public static final deprecated java.lang.String NETWORK_PREFERENCE = "network_preference";
     field public static final java.lang.String NEXT_ALARM_FORMATTED = "next_alarm_formatted";
@@ -17588,6 +17837,7 @@ package android.provider {
     field public static final java.lang.String VIBRATE_ON = "vibrate_on";
     field public static final java.lang.String VOLUME_ALARM = "volume_alarm";
     field public static final java.lang.String VOLUME_BLUETOOTH_SCO = "volume_bluetooth_sco";
+    field public static final java.lang.String VOLUME_FM = "volume_fm";
     field public static final java.lang.String VOLUME_MUSIC = "volume_music";
     field public static final java.lang.String VOLUME_NOTIFICATION = "volume_notification";
     field public static final java.lang.String VOLUME_RING = "volume_ring";
@@ -19005,6 +19255,48 @@ package android.telephony {
     method public static void requestLocationUpdate();
   }
 
+  public class MSimSmsManager {
+    ctor public MSimSmsManager();
+    method public java.util.ArrayList<java.lang.String> divideMessage(java.lang.String);
+    method public static android.telephony.MSimSmsManager getDefault();
+    method public void sendMultipartTextMessage(java.lang.String, java.lang.String, java.util.ArrayList<java.lang.String>, java.util.ArrayList<android.app.PendingIntent>, java.util.ArrayList<android.app.PendingIntent>, int);
+    field public static final int RESULT_ERROR_GENERIC_FAILURE = 1; // 0x1
+    field public static final int RESULT_ERROR_NO_SERVICE = 4; // 0x4
+    field public static final int RESULT_ERROR_NULL_PDU = 3; // 0x3
+    field public static final int RESULT_ERROR_RADIO_OFF = 2; // 0x2
+    field public static final int STATUS_ON_ICC_FREE = 0; // 0x0
+    field public static final int STATUS_ON_ICC_READ = 1; // 0x1
+    field public static final int STATUS_ON_ICC_SENT = 5; // 0x5
+    field public static final int STATUS_ON_ICC_UNREAD = 3; // 0x3
+    field public static final int STATUS_ON_ICC_UNSENT = 7; // 0x7
+    field protected static boolean isMultiSimEnabled;
+  }
+
+  public class MSimTelephonyManager extends android.telephony.TelephonyManager {
+    method public int getCallState(int);
+    method public int getDefaultSubscription();
+    method public java.lang.String getDeviceId(int);
+    method public java.lang.String getLine1Number(int);
+    method public java.lang.String getNetworkCountryIso(int);
+    method public java.lang.String getNetworkOperator(int);
+    method public java.lang.String getNetworkOperatorName(int);
+    method public static int getNetworkType(int);
+    method protected int getPhoneTypeFromProperty(int);
+    method public int getPreferredDataSubscription();
+    method public int getPreferredVoiceSubscription();
+    method public java.lang.String getSimCountryIso(int);
+    method public java.lang.String getSimOperator(int);
+    method public java.lang.String getSimOperatorName(int);
+    method public java.lang.String getSimSerialNumber(int);
+    method public int getSimState(int);
+    method public java.lang.String getSubscriberId(int);
+    method public java.lang.String getVoiceMailAlphaTag(int);
+    method public java.lang.String getVoiceMailNumber(int);
+    method public boolean hasIccCard(int);
+    method public boolean isNetworkRoaming(int);
+    method public boolean setPreferredDataSubscription(int);
+  }
+
   public class NeighboringCellInfo implements android.os.Parcelable {
     ctor public deprecated NeighboringCellInfo();
     ctor public deprecated NeighboringCellInfo(int, int);
@@ -19224,7 +19516,9 @@ package android.telephony {
     method public java.lang.String getNetworkOperator();
     method public java.lang.String getNetworkOperatorName();
     method public int getNetworkType();
+    method public int getPhoneCount();
     method public int getPhoneType();
+    method protected int getPhoneTypeFromProperty();
     method public java.lang.String getSimCountryIso();
     method public java.lang.String getSimOperator();
     method public java.lang.String getSimOperatorName();
@@ -19234,6 +19528,7 @@ package android.telephony {
     method public java.lang.String getVoiceMailAlphaTag();
     method public java.lang.String getVoiceMailNumber();
     method public boolean hasIccCard();
+    method public boolean isMultiSimEnabled();
     method public boolean isNetworkRoaming();
     method public void listen(android.telephony.PhoneStateListener, int);
     field public static final java.lang.String ACTION_PHONE_STATE_CHANGED = "android.intent.action.PHONE_STATE";
@@ -21781,6 +22076,19 @@ package android.util {
     enum_constant public static final android.util.Xml.Encoding UTF_8;
   }
 
+  public class jTestFramework {
+    ctor public jTestFramework();
+    method public static int print(int, java.lang.String, java.lang.String, java.lang.String);
+    method public static int print_if(boolean, int, java.lang.String, java.lang.String, java.lang.String);
+    method public static int turnoff();
+    method public static int turnon();
+    method public static int write(java.lang.String);
+    method public static int write_if(boolean, java.lang.String);
+    field public static final int TF_EVENT_JAVA = 32; // 0x20
+    field public static final int TF_EVENT_JAVA_START = 8; // 0x8
+    field public static final int TF_EVENT_JAVA_STOP = 16; // 0x10
+  }
+
 }
 
 package android.view {
@@ -22833,6 +23141,7 @@ package android.view {
     method public android.graphics.Canvas lockCanvas(android.graphics.Rect) throws java.lang.IllegalArgumentException, android.view.Surface.OutOfResourcesException;
     method public void readFromParcel(android.os.Parcel);
     method public void release();
+    method public void setStereoscopic3DFormat(int);
     method public void unlockCanvas(android.graphics.Canvas);
     method public void unlockCanvasAndPost(android.graphics.Canvas);
     method public void writeToParcel(android.os.Parcel, int);
@@ -22862,6 +23171,10 @@ package android.view {
     method public abstract void setSizeFromLayout();
     method public abstract deprecated void setType(int);
     method public abstract void unlockCanvasAndPost(android.graphics.Canvas);
+    field public static final int STEREOSCOPIC_3D_FORMAT_INTERLEAVED = 262144; // 0x40000
+    field public static final int STEREOSCOPIC_3D_FORMAT_SIDE_BY_SIDE_HALF_L_R = 65536; // 0x10000
+    field public static final int STEREOSCOPIC_3D_FORMAT_SIDE_BY_SIDE_R_L = 524288; // 0x80000
+    field public static final int STEREOSCOPIC_3D_FORMAT_TOP_BOTTOM = 131072; // 0x20000
     field public static final deprecated int SURFACE_TYPE_GPU = 2; // 0x2
     field public static final deprecated int SURFACE_TYPE_HARDWARE = 1; // 0x1
     field public static final deprecated int SURFACE_TYPE_NORMAL = 0; // 0x0

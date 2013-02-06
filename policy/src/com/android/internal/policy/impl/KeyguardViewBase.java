@@ -223,6 +223,13 @@ public abstract class KeyguardViewBase extends FrameLayout {
                                                 ? AudioManager.ADJUST_RAISE
                                                 : AudioManager.ADJUST_LOWER,
                                         0);
+                        } else if (mAudioManager.isFMActive()) {
+                            mAudioManager.adjustStreamVolume(
+                                        AudioManager.STREAM_FM,
+                                        keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                                                ? AudioManager.ADJUST_RAISE
+                                                : AudioManager.ADJUST_LOWER,
+                                        0);
                         }
                         // Don't execute default volume behavior
                         return true;

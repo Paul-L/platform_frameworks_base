@@ -280,6 +280,12 @@ status_t Composer::setFreezeTint(const sp<SurfaceComposerClient>& client,
     return NO_ERROR;
 }
 
+void SurfaceComposerClient::enableExternalDisplay(int disp_type, int enable)
+{
+    sp<ISurfaceComposer> sm(getComposerService());
+    return sm->enableExternalDisplay(disp_type, enable);
+}
+
 status_t Composer::setOrientation(int orientation) {
     Mutex::Autolock _l(mLock);
     mOrientation = orientation;

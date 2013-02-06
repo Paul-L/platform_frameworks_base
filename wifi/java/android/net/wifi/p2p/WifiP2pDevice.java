@@ -42,6 +42,12 @@ public class WifiP2pDevice implements Parcelable {
     public String deviceAddress;
 
     /**
+     * pin as part of P2P-PROV-DISC-SHOW-PIN event
+     * @hide
+     */
+    public String pinShown;
+
+    /**
      * interfaceAddress
      *
      * This address is used during group owner negotiation as the Intended
@@ -97,6 +103,12 @@ public class WifiP2pDevice implements Parcelable {
     public int wpsConfigMethodsSupported;
 
     /**
+     * peer GO info in PD response
+     * @hide
+     */
+    public int peer_go;
+
+    /**
      * Device capability
      * @hide
      */
@@ -116,6 +128,10 @@ public class WifiP2pDevice implements Parcelable {
 
     /** Device connection status */
     public int status = UNAVAILABLE;
+
+    /** Device WFD support Info */
+
+    public WfdInfo wfdInfo;
 
     public WifiP2pDevice() {
     }
@@ -196,8 +212,49 @@ public class WifiP2pDevice implements Parcelable {
         if (tokens[0].startsWith("P2P-DEVICE-FOUND")) {
             status = AVAILABLE;
         }
-    }
 
+        if (tokens[0].startsWith("P2P-PROV-DISC-FAILURE")) {
+            for (String token : tokens) {
+                String[] nameValue = token.split("=");
+                if (nameValue.length != 2) continue;
+                if (nameValue[0].equals("p2p_dev_addr")) {
+                   deviceAddress = nameValue[1];
+                   continue;
+                 }
+            }
+        }
+
+        if (tokens[0].startsWith("P2P-PROV-DISC-ENTER-PIN")) {
+            deviceAddress = tokens[1];
+            for (String token : tokens) {
+                String[] nameValue = token.split("=");
+                if (nameValue.length != 2) continue;
+                if (nameValue[0].equals("peer_go")) {
+                    peer_go = Integer.parseInt(nameValue[1]);
+                     continue;
+                }
+            }
+        }
+
+        if (tokens[0].startsWith("P2P-PROV-DISC-SHOW-PIN")) {
+            deviceAddress = tokens[1];
+            pinShown = tokens[2];
+            for (String token : tokens) {
+                String[] nameValue = token.split("=");
+                if (nameValue.length != 2) continue;
+                if (nameValue[0].equals("peer_go")) {
+                    peer_go = Integer.parseInt(nameValue[1]);
+                    continue;
+                 }
+             }
+         }
+
+         /** Look for WFD information in device information string */
+         wfdInfo = new WfdInfo(string);
+         if(wfdInfo.isWFDDevice() != true) {
+             wfdInfo = null;
+         }
+    }
     /** Returns true if WPS push button configuration is supported */
     public boolean wpsPbcSupported() {
         return (wpsConfigMethodsSupported & WPS_CONFIG_PUSHBUTTON) != 0;
@@ -246,6 +303,9 @@ public class WifiP2pDevice implements Parcelable {
         sbuf.append("\n grpcapab: ").append(groupCapability);
         sbuf.append("\n devcapab: ").append(deviceCapability);
         sbuf.append("\n status: ").append(status);
+        if(wfdInfo != null) {
+           sbuf.append("\n").append(wfdInfo.toString());
+        }
         return sbuf.toString();
     }
 
@@ -266,6 +326,7 @@ public class WifiP2pDevice implements Parcelable {
             deviceCapability = source.deviceCapability;
             groupCapability = source.groupCapability;
             status = source.status;
+            wfdInfo = source.wfdInfo;
         }
     }
 
@@ -280,6 +341,7 @@ public class WifiP2pDevice implements Parcelable {
         dest.writeInt(deviceCapability);
         dest.writeInt(groupCapability);
         dest.writeInt(status);
+        dest.writeValue(wfdInfo);
     }
 
     /** Implement the Parcelable interface */
@@ -296,6 +358,7 @@ public class WifiP2pDevice implements Parcelable {
                 device.deviceCapability = in.readInt();
                 device.groupCapability = in.readInt();
                 device.status = in.readInt();
+                device.wfdInfo = (WfdInfo) in.readValue(null);
                 return device;
             }
 
@@ -307,7 +370,12 @@ public class WifiP2pDevice implements Parcelable {
     private String trimQuotes(String str) {
         str = str.trim();
         if (str.startsWith("'") && str.endsWith("'")) {
-            return str.substring(1, str.length()-1);
+            if((str.length()-1) > 0){
+                return str.substring(1, str.length()-1);
+            }
+            else{
+                return "";
+            }
         }
         return str;
     }

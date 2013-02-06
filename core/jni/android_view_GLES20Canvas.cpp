@@ -43,10 +43,7 @@
 #include <SkiaShader.h>
 #include <SkiaColorFilter.h>
 #include <Rect.h>
-
-#ifdef QCOM_HARDWARE
 #include <tilerenderer.h>
-#endif
 
 #include <TextLayout.h>
 
@@ -180,7 +177,6 @@ static void android_view_GLES20Canvas_prepare(JNIEnv* env, jobject clazz,
     renderer->prepare(opaque);
 }
 
-#ifdef QCOM_HARDWARE
 static void android_view_GLES20Canvas_startTileRendering(JNIEnv* env, jobject clazz,
         OpenGLRenderer* renderer, jint left, jint top, jint right, jint bottom) {
     TileRenderer::getInstance().startTileRendering(renderer, left, top, right, bottom);
@@ -190,7 +186,6 @@ static void android_view_GLES20Canvas_endTileRendering(JNIEnv* env, jobject claz
         OpenGLRenderer* renderer) {
     TileRenderer::getInstance().endTileRendering(renderer);
 }
-#endif
 
 static void android_view_GLES20Canvas_prepareDirty(JNIEnv* env, jobject clazz,
         OpenGLRenderer* renderer, jint left, jint top, jint right, jint bottom,
@@ -801,10 +796,8 @@ static JNINativeMethod gMethods[] = {
     { "nSetViewport",       "(III)V",          (void*) android_view_GLES20Canvas_setViewport },
     { "nPrepare",           "(IZ)V",           (void*) android_view_GLES20Canvas_prepare },
     { "nPrepareDirty",      "(IIIIIZ)V",       (void*) android_view_GLES20Canvas_prepareDirty },
-#ifdef QCOM_HARDWARE
     { "nStartTileRendering","(IIIII)V",        (void*) android_view_GLES20Canvas_startTileRendering},
     { "nEndTileRendering",  "(I)V",            (void*) android_view_GLES20Canvas_endTileRendering},
-#endif
     { "nFinish",            "(I)V",            (void*) android_view_GLES20Canvas_finish },
 
     { "nCallDrawGLFunction", "(II)Z",

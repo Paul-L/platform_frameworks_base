@@ -77,6 +77,8 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
     private int         mVideoHeight;
     private int         mSurfaceWidth;
     private int         mSurfaceHeight;
+    private int         mPreviousWidth;
+    private int         mPreviousHeight;
     private MediaController mMediaController;
     private OnCompletionListener mOnCompletionListener;
     private MediaPlayer.OnPreparedListener mOnPreparedListener;
@@ -86,6 +88,7 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
     private boolean     mCanPause;
     private boolean     mCanSeekBack;
     private boolean     mCanSeekForward;
+    private int         m3DAttributes;
 
     public VideoView(Context context) {
         super(context);
@@ -118,6 +121,18 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
                 //Log.i("@@@", "aspect ratio is correct: " +
                         //width+"/"+height+"="+
                         //mVideoWidth+"/"+mVideoHeight);
+            }
+            mPreviousWidth = mVideoWidth;
+            mPreviousHeight = mVideoHeight;
+        } else if (mPreviousWidth > 0 && mPreviousHeight > 0) {
+            width = getDefaultSize(mPreviousWidth, widthMeasureSpec);
+            height = getDefaultSize(mPreviousHeight, heightMeasureSpec);
+            if ( mPreviousWidth * height > width * mPreviousHeight ) {
+               Log.i("VideoView", "image too tall, correcting");
+               height = width * mPreviousHeight / mPreviousWidth;
+            } else if ( mPreviousWidth * height < width * mPreviousHeight ) {
+               Log.i("VideoView", "image too wide, correcting");
+               width = height * mPreviousWidth / mPreviousHeight;
             }
         }
         //Log.i("@@@@@@@@@@", "setting size: " + width + 'x' + height);
@@ -213,6 +228,7 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
             mMediaPlayer = new MediaPlayer();
             mMediaPlayer.setOnPreparedListener(mPreparedListener);
             mMediaPlayer.setOnVideoSizeChangedListener(mSizeChangedListener);
+            mMediaPlayer.setOnInfoListener(mInfoListener);
             mDuration = -1;
             mMediaPlayer.setOnCompletionListener(mCompletionListener);
             mMediaPlayer.setOnErrorListener(mErrorListener);
@@ -274,6 +290,8 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
     MediaPlayer.OnPreparedListener mPreparedListener = new MediaPlayer.OnPreparedListener() {
         public void onPrepared(MediaPlayer mp) {
             mCurrentState = STATE_PREPARED;
+
+            mp.setParameter(MediaPlayer.KEY_PARAMETER_3D_ATTRIBUTES, m3DAttributes);
 
             // Get the capabilities of the player for this stream
             Metadata data = mp.getMetadata(MediaPlayer.METADATA_ALL,
@@ -404,6 +422,17 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
         new MediaPlayer.OnBufferingUpdateListener() {
         public void onBufferingUpdate(MediaPlayer mp, int percent) {
             mCurrentBufferPercentage = percent;
+        }
+    };
+
+    private MediaPlayer.OnInfoListener mInfoListener =
+        new MediaPlayer.OnInfoListener() {
+        public boolean onInfo(MediaPlayer mp, int framework_err, int impl_err) {
+            if (framework_err == MediaPlayer.KEY_PARAMETER_3D_ATTRIBUTES) {
+                m3DAttributes = impl_err;
+                return true;
+            }
+            return false;
         }
     };
 
@@ -574,6 +603,10 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
     }
 
     public void suspend() {
+        if(mSeekWhenPrepared == 0) {
+          mSeekWhenPrepared = getCurrentPosition();
+        }
+        Log.v(TAG, "suspend( ) - will resume at " + mSeekWhenPrepared);
         release(false);
     }
 
@@ -597,6 +630,9 @@ public class VideoView extends SurfaceView implements MediaPlayerControl {
     public int getCurrentPosition() {
         if (isInPlaybackState()) {
             return mMediaPlayer.getCurrentPosition();
+        }
+        else if(mSeekWhenPrepared != 0) {
+          return mSeekWhenPrepared;
         }
         return 0;
     }

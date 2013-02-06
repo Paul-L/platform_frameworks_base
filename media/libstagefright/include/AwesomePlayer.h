@@ -139,6 +139,7 @@ private:
         TEXTPLAYER_STARTED  = 0x20000,
 
         SLOW_DECODER_HACK   = 0x40000,
+        NOTIFY_ATTRIBUTES   = 0x80000000,
     };
 
     mutable Mutex mLock;
@@ -168,6 +169,7 @@ private:
     sp<MediaSource> mVideoSource;
     sp<AwesomeRenderer> mVideoRenderer;
     bool mVideoRendererIsPreview;
+    bool mAudioEOD;
 
     sp<MediaSource> mAudioTrack;
     sp<MediaSource> mAudioSource;
@@ -291,6 +293,7 @@ private:
     bool isStreamingHTTP() const;
     void sendCacheStats();
 
+    bool mBufferingDone;
     enum FlagMode {
         SET,
         CLEAR,
@@ -306,6 +309,8 @@ private:
     void logOnTime(int64_t ts, int64_t clock, int64_t delta);
     void logSyncLoss();
     int64_t getTimeOfDayUs();
+    void notifyVideoAttributes_l();
+
     bool mVeryFirstFrame;
     bool mStatistics;
 
@@ -334,13 +339,15 @@ private:
         uint32_t mMaxEarlyDelta;
         uint32_t mMaxLateDelta;
         uint32_t mMaxTimeSyncLoss;
-        uint32_t mTotalFrames;
+        uint64_t mTotalFrames;
         int64_t mFirstFrameLatencyStartUs; //first frame latency start
         int64_t mLastFrame;
         int64_t mLastFrameUs;
-        int64_t mFPSSumUs;
+        double mFPSSumUs;
         int64_t mStatisticsFrames;
         bool mVeryFirstFrame;
+        int64_t mTotalTime;
+        int64_t mFirstFrameTime;
 
     } mStats;
 

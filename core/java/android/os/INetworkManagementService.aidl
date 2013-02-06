@@ -1,6 +1,7 @@
 /* //device/java/android/android/os/INetworkManagementService.aidl
 **
 ** Copyright 2007, The Android Open Source Project
+** Copyright (c) 2011,2012 Code Aurora Forum. All rights reserved.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -21,6 +22,7 @@ import android.net.InterfaceConfiguration;
 import android.net.INetworkManagementEventObserver;
 import android.net.NetworkStats;
 import android.net.RouteInfo;
+import android.net.LinkAddress;
 import android.net.wifi.WifiConfiguration;
 
 /**
@@ -121,6 +123,36 @@ interface INetworkManagementService
      */
     void shutdown();
 
+   /**
+    ** Policy Routing
+    **/
+
+   /**
+    * Replaces a source policy route for the given iface and protocol family AF_INET
+    * in a custom routing table denoted by routeId, if it already exists.
+    * Adds a new route if it did not exist.
+    */
+   boolean replaceV4SrcRoute(String iface, String ipAddr, String gatewayAddr, int routeId);
+
+   /**
+    * Replaces a source policy route for the given iface and protocol family AF_INET6
+    * in a custom routing table denoted by routeId, if it already exists.
+    * Adds a new route if it did not exist.
+    */
+   boolean replaceV6SrcRoute(String iface, String ipAddr, String gatewayAddr, int routeId);
+
+   /**
+    * Deletes a source policy route for the given route identifier
+    * and protocol family AF_INET from a custom routing table
+    */
+   boolean delV4SrcRoute(int routeId);
+
+   /**
+    * Deletes a source policy route for the given route identifier
+    * and protocol family AF_INET6 from a custom routing table
+    */
+   boolean delV6SrcRoute(int routeId);
+
     /**
      ** TETHERING RELATED
      **/
@@ -187,6 +219,36 @@ interface INetworkManagementService
      *  Disables Network Address Translation between two interfaces.
      */
     void disableNat(String internalInterface, String externalInterface);
+
+    /**
+     *  Extension of 'enableNat' interface by subnets
+     *  @param internalInterface is the tethered internal interface
+     *  @param externalInterface is the upStreaminterface that is tethered
+     *  @param subnets[] comprises of an array of LinkAdrresses
+     *  associated with a given network interface
+     */
+    void enableNatBySubnet(String internalInterface, String externalInterface,
+            in LinkAddress[] subnets);
+
+    /**
+     *  Extension of 'disableNat' interface by subnets
+     *  @param internalInterface is the tethered internal interface
+     *  @param externalInterface is the upStreaminterface that is tethered
+     *  @param subnets[] comprises of an array of LinkAdrresses
+     *  associated with a given network interface
+     */
+    void disableNatBySubnet(String internalInterface, String externalInterface,
+            in LinkAddress[] subnets);
+
+    /**
+     * Add an upstream IPv6 interface
+     */
+    void addUpstreamV6Interface(String iface);
+
+    /**
+     * Remove an upstream IPv6 interface
+     */
+    void removeUpstreamV6Interface(String iface);
 
     /**
      ** PPPD
@@ -330,4 +392,11 @@ interface INetworkManagementService
      * Flush the DNS cache associated with the specified interface.
      */
     void flushInterfaceDnsCache(String iface);
+
+    boolean replaceV4DefaultRoute(String iface, String gatewayAddr);
+
+    /**
+     * Request router solicitation for the interface
+     */
+    String getIpv6Gateway(String iface);
 }

@@ -360,6 +360,15 @@ public class GsmConnection extends Connection {
             case CallFailCause.UNOBTAINABLE_NUMBER:
                 return DisconnectCause.UNOBTAINABLE_NUMBER;
 
+            case CallFailCause.DIAL_MODIFIED_TO_USSD:
+                return DisconnectCause.DIAL_MODIFIED_TO_USSD;
+
+            case CallFailCause.DIAL_MODIFIED_TO_SS:
+                return DisconnectCause.DIAL_MODIFIED_TO_SS;
+
+            case CallFailCause.DIAL_MODIFIED_TO_DIAL:
+                return DisconnectCause.DIAL_MODIFIED_TO_DIAL;
+
             case CallFailCause.ERROR_UNSPECIFIED:
             case CallFailCause.NORMAL_CLEARING:
             default:
@@ -370,7 +379,9 @@ public class GsmConnection extends Connection {
                 } else if (serviceState == ServiceState.STATE_OUT_OF_SERVICE
                         || serviceState == ServiceState.STATE_EMERGENCY_ONLY ) {
                     return DisconnectCause.OUT_OF_SERVICE;
-                } else if (phone.getIccCard().getState() != SimCard.State.READY) {
+                } else if (phone.getUiccApplication() == null ||
+                        phone.getUiccApplication().getState() !=
+                            IccCardApplicationStatus.AppState.APPSTATE_READY) {
                     return DisconnectCause.ICC_ERROR;
                 } else if (causeCode == CallFailCause.ERROR_UNSPECIFIED) {
                     if (phone.mSST.mRestrictedState.isCsRestricted()) {
@@ -536,25 +547,20 @@ public class GsmConnection extends Connection {
         if (PhoneNumberUtils.is12Key(c)) {
             owner.cm.sendDtmf(c, h.obtainMessage(EVENT_DTMF_DONE));
         } else if (c == PhoneNumberUtils.PAUSE) {
-            // From TS 22.101:
-
-            // "The first occurrence of the "DTMF Control Digits Separator"
-            //  shall be used by the ME to distinguish between the addressing
-            //  digits (i.e. the phone number) and the DTMF digits...."
-
-            if (nextPostDialChar == 1) {
-                // The first occurrence.
-                // We don't need to pause here, but wait for just a bit anyway
-                h.sendMessageDelayed(h.obtainMessage(EVENT_PAUSE_DONE),
-                                            PAUSE_DELAY_FIRST_MILLIS);
-            } else {
-                // It continues...
-                // "Upon subsequent occurrences of the separator, the UE shall
-                //  pause again for 3 seconds (\u00B1 20 %) before sending any
-                //  further DTMF digits."
-                h.sendMessageDelayed(h.obtainMessage(EVENT_PAUSE_DONE),
-                                            PAUSE_DELAY_MILLIS);
-            }
+            /*
+             * From TS 22.101: It continues... Upon the called party answering
+             * the UE shall send the DTMF digits automatically to the network
+             * after a delay of 3 seconds(plus/minus 20 %). The digits shall be
+             * sent according to the procedures and timing specified in 3GPP TS
+             * 24.008 [13]. The first occurrence of the
+             * "DTMF Control Digits Separator" shall be used by the ME to
+             * distinguish between the addressing digits (i.e. the phone number)
+             * and the DTMF digits. Upon subsequent occurrences of the
+             * separator, the UE shall pause again for 3 seconds before sending
+             * any further DTMF digits.
+             */
+            h.sendMessageDelayed(h.obtainMessage(EVENT_PAUSE_DONE),
+                    PAUSE_DELAY_MILLIS);
         } else if (c == PhoneNumberUtils.WAIT) {
             setPostDialState(PostDialState.WAIT);
         } else if (c == PhoneNumberUtils.WILD) {

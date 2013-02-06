@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -347,6 +348,10 @@ public final class BluetoothAdapter {
 
     private static final int ADDRESS_LENGTH = 17;
 
+    /** @hide */ public static final int HOST_PATCH_DONT_REMOVE_SERVICE = 1;
+    /** @hide */ public static final int HOST_PATCH_AVOID_CONNECT_ON_PAIR = 2;
+    /** @hide */ public static final int HOST_PATCH_AVOID_AUTO_CONNECT = 3;
+
     /**
      * Lazily initialized singleton. Guaranteed final after first object
      * constructed.
@@ -356,6 +361,14 @@ public final class BluetoothAdapter {
     private final IBluetooth mService;
 
     private Handler mServiceRecordHandler;
+
+    /** @hide */
+    public boolean isHostPatchRequired (BluetoothDevice btDevice, int patch_id) {
+        try {
+            return mService.isHostPatchRequired (btDevice, patch_id);
+        } catch (RemoteException e) {Log.e(TAG, "", e);}
+        return false;
+    }
 
     /**
      * Get a handle to the default local Bluetooth adapter.
@@ -420,6 +433,32 @@ public final class BluetoothAdapter {
     }
 
     /**
+     * Query the registration state of a service
+     * @return true if the service is registered
+     * @hide
+     */
+    public boolean isServiceRegistered(ParcelUuid uuid) {
+       try {
+           return mService.isServiceRegistered(uuid);
+       } catch (RemoteException e) {Log.e(TAG, "", e);}
+       return false;
+    }
+
+    /**
+     * Register/deregister a service
+     * @param uuid uuid of the service to be registered
+     * @param enable true/false to register/deregister a service
+     * @return true if register/deregister is succeeded
+     * @hide
+     */
+    public boolean registerService(ParcelUuid uuid , boolean enable) {
+      try {
+          return mService.registerService(uuid, enable);
+      } catch (RemoteException e) {Log.e(TAG, "", e);}
+        return false;
+    }
+
+    /**
      * Get the current state of the local Bluetooth adapter.
      * <p>Possible return values are
      * {@link #STATE_OFF},
@@ -431,6 +470,7 @@ public final class BluetoothAdapter {
      * @return current state of Bluetooth adapter
      */
     public int getState() {
+        if (mService == null) return STATE_OFF;
         try {
             return mService.getBluetoothState();
         } catch (RemoteException e) {Log.e(TAG, "", e);}
@@ -547,6 +587,20 @@ public final class BluetoothAdapter {
     }
 
     /**
+     * Get the Class of Device (COD) of the local Bluetooth adapter.
+     * <p>Requires {@link android.Manifest.permission#BLUETOOTH}
+     *
+     * @return the Bluetooth COD, or null on error
+     * @hide
+     */
+    public String getCOD() {
+        try {
+            return mService.getCOD();
+        } catch (RemoteException e) {Log.e(TAG, "", e);}
+        return null;
+    }
+
+    /**
      * Set the friendly Bluetooth name of the local Bluetooth adapter.
      * <p>This name is visible to remote Bluetooth devices.
      * <p>Valid Bluetooth names are a maximum of 248 bytes using UTF-8
@@ -569,8 +623,21 @@ public final class BluetoothAdapter {
         return false;
     }
 
+  /**
+     * Set whether WiFi can be used for Bluetooth transfers
+     * <p>Requires {@link android.Manifest.permission#BLUETOOTH}
+     * @param enable Set true allows WiFi (system default)
+     *
+     * @hide
+     */
+    public void setUseWifi(boolean enable) {
+        try {
+            mService.setUseWifiForBtTransfers(enable);
+        } catch (RemoteException e) {Log.e(TAG, "", e);}
+    }
+
     /**
-     * Get the current Bluetooth scan mode of the local Bluetooth adapter.
+     * Get the current Bluetooth scan mode of the local Bluetooth adaper.
      * <p>The Bluetooth scan mode determines if the local adapter is
      * connectable and/or discoverable from remote Bluetooth devices.
      * <p>Possible values are:
@@ -816,10 +883,15 @@ public final class BluetoothAdapter {
      */
     private static class RfcommChannelPicker {
         private static final int[] RESERVED_RFCOMM_CHANNELS =  new int[] {
+            1,   // DUN
             10,  // HFAG
             11,  // HSAG
             12,  // OPUSH
+            15,  // SAP
+            16,  // MAS0
+            17,  // MAS1
             19,  // PBAP
+            20,  // FTP
         };
         private static LinkedList<Integer> sChannels;  // master list of non-reserved channels
         private static Random sRandom;
@@ -876,6 +948,62 @@ public final class BluetoothAdapter {
             try {
                 socket.close();
             } catch (IOException e) {}
+            socket.mSocket.throwErrnoNative(errno);
+        }
+        return socket;
+    }
+
+
+    /**
+     * Create a listening, secure L2Cap Bluetooth socket.
+     * <p>A remote device connecting to this socket will be authenticated and
+     * communication on this socket will be encrypted.
+     * <p>Use {@link BluetoothServerSocket#accept} to retrieve incoming
+     * connections from a listening {@link BluetoothServerSocket}.
+     * <p>Requires {@link android.Manifest.permission#BLUETOOTH_ADMIN}
+     * @param psm L2Cap psm to listen on
+     * @return a listening L2Cap BluetoothServerSocket
+     * @throws IOException on error, for example Bluetooth not available, or
+     *                     insufficient permissions, or channel in use.
+     * @hide
+     */
+    public BluetoothServerSocket listenUsingL2capOn(int psm) throws IOException {
+        BluetoothServerSocket socket = new BluetoothServerSocket(
+                BluetoothSocket.TYPE_L2CAP, true, true, psm);
+        int errno = socket.mSocket.bindListen();
+        if (errno != 0) {
+            try {
+                socket.close();
+            } catch (IOException e) {}
+            socket.mSocket.throwErrnoNative(errno);
+        }
+        return socket;
+    }
+
+    /**
+     * Create a listening, secure EL2Cap Bluetooth socket.
+     * <p>A remote device connecting to this socket will be authenticated and
+     * communication on this socket will be encrypted.
+     * <p>Use {@link BluetoothServerSocket#accept} to retrieve incoming
+     * connections from a listening {@link BluetoothServerSocket}.
+     * <p>Requires {@link android.Manifest.permission#BLUETOOTH_ADMIN}
+     * @param psm L2Cap psm to listen on
+     * @return a listening L2Cap BluetoothServerSocket
+     * @throws IOException on error, for example Bluetooth not available, or
+     *                     insufficient permissions, or channel in use.
+     * @hide
+     */
+    public BluetoothServerSocket listenUsingEl2capOn(int psm) throws IOException {
+        BluetoothServerSocket socket = new BluetoothServerSocket(
+                BluetoothSocket.TYPE_EL2CAP, true, true, psm);
+        int errno = socket.mSocket.bindListen();
+        if (errno != 0) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // Intentionally ignoring (give close() a chance, but we're
+                // going to be throwing up an exception regardless (below)).
+            }
             socket.mSocket.throwErrnoNative(errno);
         }
         return socket;
@@ -1085,6 +1213,54 @@ public final class BluetoothAdapter {
     }
 
     /**
+     * Construct an unencrypted, unauthenticated, L2Cap server socket.
+     * Call #accept to retrieve connections to this socket.
+     * @param psm L2Cap psm to listen on
+     * @return An L2Cap BluetoothServerSocket
+     * @throws IOException On error, for example Bluetooth not available, or
+     *                     insufficient permissions.
+     * @hide
+     */
+    public BluetoothServerSocket listenUsingInsecureL2capOn(int psm) throws IOException {
+        BluetoothServerSocket socket = new BluetoothServerSocket(
+                BluetoothSocket.TYPE_L2CAP, false, false, psm);
+        int errno = socket.mSocket.bindListen();
+        if (errno != 0) {
+            try {
+                socket.close();
+            } catch (IOException e) {}
+            socket.mSocket.throwErrnoNative(errno);
+        }
+        return socket;
+    }
+
+    /**
+     * Construct an unencrypted, unauthenticated, EL2Cap server socket.
+     * Call #accept to retrieve connections to this socket.
+     * @param psm L2Cap psm to listen on
+     * @return An L2Cap BluetoothServerSocket
+     * @throws IOException On error, for example Bluetooth not available, or
+     *                     insufficient permissions.
+     * @hide
+     */
+    public BluetoothServerSocket listenUsingInsecureEl2capOn(int psm) throws IOException {
+        BluetoothServerSocket socket = new BluetoothServerSocket(
+                BluetoothSocket.TYPE_EL2CAP, false, false, psm);
+        int errno = socket.mSocket.bindListen();
+        if (errno != 0) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // Intentionally ignoring (give close() a chance, but we're
+                // going to be throwing up an exception regardless (below)).
+            }
+            socket.mSocket.throwErrnoNative(errno);
+        }
+        return socket;
+    }
+
+
+    /**
      * Construct a SCO server socket.
      * Call #accept to retrieve connections to this socket.
      * @return A SCO BluetoothServerSocket
@@ -1169,6 +1345,9 @@ public final class BluetoothAdapter {
         } else if (profile == BluetoothProfile.HEALTH) {
             BluetoothHealth health = new BluetoothHealth(context, listener);
             return true;
+        } else if (profile == BluetoothProfile.GATT) {
+            BluetoothGatt gatt = new BluetoothGatt(context, listener);
+            return true;
         } else {
             return false;
         }
@@ -1208,6 +1387,10 @@ public final class BluetoothAdapter {
             case BluetoothProfile.HEALTH:
                 BluetoothHealth health = (BluetoothHealth)proxy;
                 health.close();
+                break;
+           case BluetoothProfile.GATT:
+                BluetoothGatt gatt = (BluetoothGatt)proxy;
+                gatt.close();
                 break;
         }
     }

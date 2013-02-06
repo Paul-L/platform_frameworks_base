@@ -24,7 +24,10 @@ import android.media.DecoderCapabilities;
 import android.media.DecoderCapabilities.VideoDecoder;
 import android.media.DecoderCapabilities.AudioDecoder;
 import android.mtp.MtpConstants;
-
+import android.os.SystemProperties;
+import java.io.FileReader;
+import java.lang.String;
+import android.util.Log;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -47,13 +50,18 @@ public class MediaFile {
     public static final int FILE_TYPE_AAC     = 8;
     public static final int FILE_TYPE_MKA     = 9;
     public static final int FILE_TYPE_FLAC    = 10;
+    public static final int FILE_TYPE_3GPA    = 11;
+    public static final int FILE_TYPE_AC3     = 12;
+    public static final int FILE_TYPE_QCP     = 13;
+    public static final int FILE_TYPE_WEBMA   = 14;
+    public static final int FILE_TYPE_PCM     = 15;
     private static final int FIRST_AUDIO_FILE_TYPE = FILE_TYPE_MP3;
-    private static final int LAST_AUDIO_FILE_TYPE = FILE_TYPE_FLAC;
+    private static final int LAST_AUDIO_FILE_TYPE = FILE_TYPE_PCM;
 
     // MIDI file types
-    public static final int FILE_TYPE_MID     = 11;
-    public static final int FILE_TYPE_SMF     = 12;
-    public static final int FILE_TYPE_IMY     = 13;
+    public static final int FILE_TYPE_MID     = 16;
+    public static final int FILE_TYPE_SMF     = 17;
+    public static final int FILE_TYPE_IMY     = 18;
     private static final int FIRST_MIDI_FILE_TYPE = FILE_TYPE_MID;
     private static final int LAST_MIDI_FILE_TYPE = FILE_TYPE_IMY;
    
@@ -68,8 +76,9 @@ public class MediaFile {
     public static final int FILE_TYPE_MP2TS   = 28;
     public static final int FILE_TYPE_AVI     = 29;
     public static final int FILE_TYPE_WEBM    = 30;
+    public static final int FILE_TYPE_DIVX    = 31;
     private static final int FIRST_VIDEO_FILE_TYPE = FILE_TYPE_MP4;
-    private static final int LAST_VIDEO_FILE_TYPE = FILE_TYPE_WEBM;
+    private static final int LAST_VIDEO_FILE_TYPE = FILE_TYPE_DIVX;
     
     // More video file types
     public static final int FILE_TYPE_MP2PS   = 200;
@@ -77,12 +86,12 @@ public class MediaFile {
     private static final int LAST_VIDEO_FILE_TYPE2 = FILE_TYPE_MP2PS;
 
     // Image file types
-    public static final int FILE_TYPE_JPEG    = 31;
-    public static final int FILE_TYPE_GIF     = 32;
-    public static final int FILE_TYPE_PNG     = 33;
-    public static final int FILE_TYPE_BMP     = 34;
-    public static final int FILE_TYPE_WBMP    = 35;
-    public static final int FILE_TYPE_WEBP    = 36;
+    public static final int FILE_TYPE_JPEG    = 32;
+    public static final int FILE_TYPE_GIF     = 33;
+    public static final int FILE_TYPE_PNG     = 34;
+    public static final int FILE_TYPE_BMP     = 35;
+    public static final int FILE_TYPE_WBMP    = 36;
+    public static final int FILE_TYPE_WEBP    = 37;
     private static final int FIRST_IMAGE_FILE_TYPE = FILE_TYPE_JPEG;
     private static final int LAST_IMAGE_FILE_TYPE = FILE_TYPE_WEBP;
    
@@ -91,15 +100,20 @@ public class MediaFile {
     public static final int FILE_TYPE_PLS      = 42;
     public static final int FILE_TYPE_WPL      = 43;
     public static final int FILE_TYPE_HTTPLIVE = 44;
+    public static final int FILE_TYPE_DASH     = 45;
 
     private static final int FIRST_PLAYLIST_FILE_TYPE = FILE_TYPE_M3U;
-    private static final int LAST_PLAYLIST_FILE_TYPE = FILE_TYPE_HTTPLIVE;
+    private static final int LAST_PLAYLIST_FILE_TYPE = FILE_TYPE_DASH;
 
     // Drm file types
     public static final int FILE_TYPE_FL      = 51;
     private static final int FIRST_DRM_FILE_TYPE = FILE_TYPE_FL;
     private static final int LAST_DRM_FILE_TYPE = FILE_TYPE_FL;
 
+    private static FileReader socinfo_fd;
+    private static char[] socinfo = new char[20];;
+    private static String build_id;
+    private static int error;
     // Other popular file types
     public static final int FILE_TYPE_TEXT          = 100;
     public static final int FILE_TYPE_HTML          = 101;
@@ -148,23 +162,61 @@ public class MediaFile {
 
     private static boolean isWMAEnabled() {
         List<AudioDecoder> decoders = DecoderCapabilities.getAudioDecoders();
+        try {
+            socinfo_fd = new FileReader("/sys/devices/system/soc/soc0/build_id");
+            error = socinfo_fd.read(socinfo,0,20);
+            if (error==-1)
+                Log.e("MediaFile","error in reading from build_id file");
+            socinfo_fd.close();
+        } catch(Exception e) {
+            Log.e("MediaFile","Exception in FileReader");
+        }
+        build_id = new String(socinfo,17,1);
         int count = decoders.size();
         for (int i = 0; i < count; i++) {
             AudioDecoder decoder = decoders.get(i);
             if (decoder == AudioDecoder.AUDIO_DECODER_WMA) {
-                return true;
-            }
+                if ("msm7630_surf".equals(SystemProperties.get("ro.board.platform"))) {
+                    if (build_id.equals("0")) {
+                        return false;
+                    }
+                    else {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
+           }
         }
         return false;
     }
 
     private static boolean isWMVEnabled() {
         List<VideoDecoder> decoders = DecoderCapabilities.getVideoDecoders();
+        try {
+            socinfo_fd = new FileReader("/sys/devices/system/soc/soc0/build_id");
+            error = socinfo_fd.read(socinfo,0,20);
+            if (error==-1)
+                Log.e("MediaFile","error in reading from build_id file");
+            socinfo_fd.close();
+        } catch(Exception e) {
+            Log.e("MediaFile","Exception in FileReader");
+        }
+        build_id = new String(socinfo,17,1);
         int count = decoders.size();
         for (int i = 0; i < count; i++) {
             VideoDecoder decoder = decoders.get(i);
             if (decoder == VideoDecoder.VIDEO_DECODER_WMV) {
-                return true;
+                if ("msm7630_surf".equals(SystemProperties.get("ro.board.platform"))) {
+                    if (build_id.equals("0")) {
+                        return false;
+                    }
+                    else {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
             }
         }
         return false;
@@ -174,13 +226,17 @@ public class MediaFile {
         addFileType("MP3", FILE_TYPE_MP3, "audio/mpeg", MtpConstants.FORMAT_MP3);
         addFileType("M4A", FILE_TYPE_M4A, "audio/mp4", MtpConstants.FORMAT_MPEG);
         addFileType("WAV", FILE_TYPE_WAV, "audio/x-wav", MtpConstants.FORMAT_WAV);
+        addFileType("WAV", FILE_TYPE_PCM, "audio/wav");
         addFileType("AMR", FILE_TYPE_AMR, "audio/amr");
         addFileType("AWB", FILE_TYPE_AWB, "audio/amr-wb");
+        addFileType("DIVX", FILE_TYPE_DIVX, "video/divx");
         if (isWMAEnabled()) {
             addFileType("WMA", FILE_TYPE_WMA, "audio/x-ms-wma", MtpConstants.FORMAT_WMA);
         }
+        addFileType("QCP", FILE_TYPE_QCP, "audio/qcp");
         addFileType("OGG", FILE_TYPE_OGG, "application/ogg", MtpConstants.FORMAT_OGG);
         addFileType("OGA", FILE_TYPE_OGG, "application/ogg", MtpConstants.FORMAT_OGG);
+        addFileType("WEBM", FILE_TYPE_WEBMA, "audio/webm");
         addFileType("AAC", FILE_TYPE_AAC, "audio/aac", MtpConstants.FORMAT_AAC);
         addFileType("AAC", FILE_TYPE_AAC, "audio/aac-adts", MtpConstants.FORMAT_AAC);
         addFileType("MKA", FILE_TYPE_MKA, "audio/x-matroska");
@@ -206,6 +262,8 @@ public class MediaFile {
         addFileType("MKV", FILE_TYPE_MKV, "video/x-matroska");
         addFileType("WEBM", FILE_TYPE_WEBM, "video/webm");
         addFileType("TS", FILE_TYPE_MP2TS, "video/mp2ts");
+        addFileType("MPG", FILE_TYPE_MP2TS, "video/mp2ts");
+
         addFileType("AVI", FILE_TYPE_AVI, "video/avi");
 
         if (isWMVEnabled()) {
@@ -228,6 +286,7 @@ public class MediaFile {
         addFileType("M3U8", FILE_TYPE_HTTPLIVE, "application/vnd.apple.mpegurl");
         addFileType("M3U8", FILE_TYPE_HTTPLIVE, "audio/mpegurl");
         addFileType("M3U8", FILE_TYPE_HTTPLIVE, "audio/x-mpegurl");
+        addFileType("MPD", FILE_TYPE_DASH, "application/dash+xml");
 
         addFileType("FL", FILE_TYPE_FL, "application/x-android-drm-fl");
 

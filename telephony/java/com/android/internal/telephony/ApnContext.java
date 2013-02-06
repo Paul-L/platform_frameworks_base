@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,14 +33,16 @@ public class ApnContext {
 
     private final String mApnType;
 
+    private final int mPriority;
+
     private DataConnectionTracker.State mState;
 
-    private ArrayList<ApnSetting> mWaitingApns = null;
+    private ArrayList<DataProfile> mWaitingApns = null;
 
     /** A zero indicates that all waiting APNs had a permanent error */
     private AtomicInteger mWaitingApnsPermanentFailureCountDown;
 
-    private ApnSetting mApnSetting;
+    private DataProfile mDataProfile;
 
     DataConnection mDataConnection;
 
@@ -57,8 +60,11 @@ public class ApnContext {
      */
     AtomicBoolean mDependencyMet;
 
+    private boolean mInPartialRetry = false;
+
     public ApnContext(String apnType, String logTag) {
         mApnType = apnType;
+        mPriority = DataConnectionTracker.mApnPriorities.get(apnType);
         mState = DataConnectionTracker.State.IDLE;
         setReason(Phone.REASON_DATA_ENABLED);
         mDataEnabled = new AtomicBoolean(false);
@@ -93,15 +99,15 @@ public class ApnContext {
         mDataConnectionAc = dcac;
     }
 
-    public synchronized ApnSetting getApnSetting() {
-        return mApnSetting;
+    public synchronized DataProfile getApnSetting() {
+        return mDataProfile;
     }
 
-    public synchronized void setApnSetting(ApnSetting apnSetting) {
-        mApnSetting = apnSetting;
+    public synchronized void setApnSetting(DataProfile apnSetting) {
+        mDataProfile = apnSetting;
     }
 
-    public synchronized void setWaitingApns(ArrayList<ApnSetting> waitingApns) {
+    public synchronized void setWaitingApns(ArrayList<DataProfile> waitingApns) {
         mWaitingApns = waitingApns;
         mWaitingApnsPermanentFailureCountDown.set(mWaitingApns.size());
     }
@@ -114,9 +120,9 @@ public class ApnContext {
         mWaitingApnsPermanentFailureCountDown.decrementAndGet();
     }
 
-    public synchronized ApnSetting getNextWaitingApn() {
-        ArrayList<ApnSetting> list = mWaitingApns;
-        ApnSetting apn = null;
+    public synchronized DataProfile getNextWaitingApn() {
+        ArrayList<DataProfile> list = mWaitingApns;
+        DataProfile apn = null;
 
         if (list != null) {
             if (!list.isEmpty()) {
@@ -132,8 +138,24 @@ public class ApnContext {
         }
     }
 
-    public synchronized ArrayList<ApnSetting> getWaitingApns() {
+    public synchronized ArrayList<DataProfile> getWaitingApns() {
         return mWaitingApns;
+    }
+
+    public synchronized int getPriority() {
+        return mPriority;
+    }
+
+    public synchronized boolean isHigherPriority(ApnContext context) {
+        return this.mPriority > context.getPriority();
+    }
+
+    public synchronized boolean isLowerPriority(ApnContext context) {
+        return this.mPriority < context.getPriority();
+    }
+
+    public synchronized boolean isEqualPriority(ApnContext context) {
+        return this.mPriority == context.getPriority();
     }
 
     public synchronized void setState(DataConnectionTracker.State s) {
@@ -172,7 +194,7 @@ public class ApnContext {
     }
 
     public boolean isReady() {
-        return mDataEnabled.get() && mDependencyMet.get();
+        return mDataEnabled.get() && mDependencyMet.get() && !getTetheredCallOn();
     }
 
     public void setEnabled(boolean enabled) {
@@ -206,5 +228,21 @@ public class ApnContext {
 
     protected void log(String s) {
         Log.d(LOG_TAG, "[ApnContext] " + s);
+    }
+
+    public void setTetheredCallOn(boolean tetheredCallOn) {
+        if (mDataProfile != null) mDataProfile.setTetheredCallOn(tetheredCallOn);
+    }
+
+    public boolean getTetheredCallOn() {
+        return mDataProfile == null ? false : mDataProfile.getTetheredCallOn();
+    }
+
+    public void setInPartialRetry(boolean inPartialRetry) {
+        mInPartialRetry = inPartialRetry;
+    }
+
+    public boolean isInPartialRetry() {
+        return mInPartialRetry;
     }
 }

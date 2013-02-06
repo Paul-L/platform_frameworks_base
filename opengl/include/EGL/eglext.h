@@ -229,7 +229,6 @@ struct ANativeWindowBuffer;
 #define EGL_NATIVE_BUFFER_ANDROID               0x3140  /* eglCreateImageKHR target */
 #endif
 
-#ifdef QCOM_HARDWARE
 #ifndef EGL_EGLEXT_PROTOTYPES
 #define EGL_EGLEXT_PROTOTYPES 1
 #endif
@@ -241,7 +240,14 @@ EGLAPI EGLClientBuffer EGLAPIENTRY eglGetRenderBufferANDROID(EGLDisplay dpy, EGL
 #endif
 typedef EGLClientBuffer (EGLAPIENTRYP PFNEGLGETRENDERBUFFERANDROIDPROC) (EGLDisplay dpy, EGLSurface draw);
 #endif
-#endif // QCOM_HARDWARE
+
+#ifndef EGL_ANDROID_swap_rectangle
+#define EGL_ANDROID_swap_rectangle 1
+#ifdef EGL_EGLEXT_PROTOTYPES
+EGLAPI EGLBoolean EGLAPIENTRY eglSetSwapRectangleANDROID (EGLDisplay dpy, EGLSurface draw, EGLint left, EGLint top, EGLint width, EGLint height);
+#endif /* EGL_EGLEXT_PROTOTYPES */
+typedef EGLBoolean (EGLAPIENTRYP PFNEGLSETSWAPRECTANGLEANDROIDPROC) (EGLDisplay dpy, EGLSurface draw, EGLint left, EGLint top, EGLint width, EGLint height);
+#endif
 
 #ifndef EGL_ANDROID_recordable
 #define EGL_ANDROID_recordable 1

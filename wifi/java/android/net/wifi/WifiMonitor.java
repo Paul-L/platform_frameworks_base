@@ -17,6 +17,7 @@
 package android.net.wifi;
 
 import android.net.NetworkInfo;
+import android.net.wifi.p2p.WfdInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pGroup;
@@ -190,6 +191,8 @@ public class WifiMonitor {
        group_capab=0x0 */
     private static final String P2P_PROV_DISC_SHOW_PIN_STR = "P2P-PROV-DISC-SHOW-PIN";
 
+    private static final String P2P_PROV_DISC_FAILURE_STR ="P2P-PROV-DISC-FAILURE";
+
     private static final String HOST_AP_EVENT_PREFIX_STR = "AP";
     /* AP-STA-CONNECTED 42:fc:89:a8:96:09 */
     private static final String AP_STA_CONNECTED_STR = "AP-STA-CONNECTED";
@@ -235,6 +238,7 @@ public class WifiMonitor {
     public static final int P2P_PROV_DISC_PBC_REQ_EVENT          = BASE + 33;
     public static final int P2P_PROV_DISC_ENTER_PIN_EVENT        = BASE + 34;
     public static final int P2P_PROV_DISC_SHOW_PIN_EVENT         = BASE + 35;
+    public static final int P2P_PROV_DISC_FAILURE_EVENT          = BASE + 36;
 
     /* hostap events */
     public static final int AP_STA_DISCONNECTED_EVENT            = BASE + 41;
@@ -451,7 +455,20 @@ public class WifiMonitor {
          */
         private void handleP2pEvents(String dataString) {
             if (dataString.startsWith(P2P_DEVICE_FOUND_STR)) {
-                mStateMachine.sendMessage(P2P_DEVICE_FOUND_EVENT, new WifiP2pDevice(dataString));
+                WifiP2pDevice wifiP2pDevice = new WifiP2pDevice(dataString);
+
+                String extra = WifiNative.p2pPeer(wifiP2pDevice.deviceAddress);
+                    Log.d(TAG, "handlep2p Peer Found" + extra);
+                if(extra.compareToIgnoreCase("FAIL") != 0) {
+                    Log.d(TAG, "handlep2p WFD Peer Found" + extra);
+                    WfdInfo wfdInfo = new WfdInfo(extra);
+                    if(wfdInfo.isWFDDevice() == true) {
+                        Log.d(TAG, "handlep2p WFD Peer Found");
+                        wifiP2pDevice.wfdInfo = wfdInfo;
+                    }
+                }
+                mStateMachine.sendMessage(P2P_DEVICE_FOUND_EVENT, wifiP2pDevice);
+
             } else if (dataString.startsWith(P2P_DEVICE_LOST_STR)) {
                 mStateMachine.sendMessage(P2P_DEVICE_LOST_EVENT, new WifiP2pDevice(dataString));
             } else if (dataString.startsWith(P2P_GO_NEG_REQUEST_STR)) {
@@ -479,10 +496,34 @@ public class WifiMonitor {
                 if (nameValue.length != 2) return;
                 mStateMachine.sendMessage(P2P_INVITATION_RESULT_EVENT, nameValue[1]);
             } else if (dataString.startsWith(P2P_PROV_DISC_PBC_REQ_STR)) {
-                mStateMachine.sendMessage(P2P_PROV_DISC_PBC_REQ_EVENT,
-                        new WifiP2pDevice(dataString));
+                WifiP2pDevice wifiP2pDevice = new WifiP2pDevice(dataString);
+                String extra = WifiNative.p2pPeer(wifiP2pDevice.deviceAddress);
+                if(extra.compareToIgnoreCase("FAIL") != 0) {
+                    Log.d(TAG, "Peer Found" + extra);
+                    WfdInfo wfdInfo = new WfdInfo(extra);
+                    if(wfdInfo.isWFDDevice() == true) {
+                        wifiP2pDevice.wfdInfo = wfdInfo;
+                    }
+                }
+                mStateMachine.sendMessage(P2P_PROV_DISC_PBC_REQ_EVENT, wifiP2pDevice);
+
             } else if (dataString.startsWith(P2P_PROV_DISC_ENTER_PIN_STR)) {
-                mStateMachine.sendMessage(P2P_PROV_DISC_ENTER_PIN_EVENT,
+                WifiP2pDevice wifiP2pDevice = new WifiP2pDevice(dataString);
+                String extra = WifiNative.p2pPeer(wifiP2pDevice.deviceAddress);
+                if(extra.compareToIgnoreCase("FAIL") != 0) {
+                    Log.d(TAG, "Peer Found" + extra);
+                    WfdInfo wfdInfo = new WfdInfo(extra);
+                    if(wfdInfo.isWFDDevice() == true) {
+                        wifiP2pDevice.wfdInfo = wfdInfo;
+                    }
+                }
+                mStateMachine.sendMessage(P2P_PROV_DISC_ENTER_PIN_EVENT, wifiP2pDevice);
+
+            } else if (dataString.startsWith(P2P_PROV_DISC_SHOW_PIN_STR)) {
+                mStateMachine.sendMessage(P2P_PROV_DISC_SHOW_PIN_EVENT,
+                        new WifiP2pDevice(dataString));
+            } else if (dataString.startsWith(P2P_PROV_DISC_FAILURE_STR)) {
+                mStateMachine.sendMessage(P2P_PROV_DISC_FAILURE_EVENT,
                         new WifiP2pDevice(dataString));
             }
         }
@@ -493,7 +534,14 @@ public class WifiMonitor {
         private void handleHostApEvents(String dataString) {
             String[] tokens = dataString.split(" ");
             if (tokens[0].equals(AP_STA_CONNECTED_STR)) {
-                mStateMachine.sendMessage(AP_STA_CONNECTED_EVENT, tokens[1]);
+                for (String token : tokens) {
+                      String[] nameValue = token.split("=");
+                      if (nameValue.length != 2) continue;
+                      if (nameValue[0].equals("dev_addr")) {
+                          String dev_addr = nameValue[1];
+                          mStateMachine.sendMessage(AP_STA_CONNECTED_EVENT, dev_addr);
+                      }
+                 }
             } else if (tokens[0].equals(AP_STA_DISCONNECTED_STR)) {
                 mStateMachine.sendMessage(AP_STA_DISCONNECTED_EVENT, tokens[1]);
             }

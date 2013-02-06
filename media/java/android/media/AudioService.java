@@ -59,7 +59,10 @@ import android.view.KeyEvent;
 import android.view.VolumePanel;
 
 import com.android.internal.telephony.ITelephony;
+import com.android.internal.telephony.Phone;
+import com.android.internal.telephony.cdma.TtyIntent;
 
+import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -185,7 +188,8 @@ public class AudioService extends IAudioService.Stub {
         15, // STREAM_BLUETOOTH_SCO
         7,  // STREAM_SYSTEM_ENFORCED
         15, // STREAM_DTMF
-        15  // STREAM_TTS
+        15,  // STREAM_TTS
+        15 // STREAM_FM
     };
     /* STREAM_VOLUME_ALIAS[] indicates for each stream if it uses the volume settings
      * of another stream: This avoids multiplying the volume settings for hidden
@@ -201,7 +205,8 @@ public class AudioService extends IAudioService.Stub {
         AudioSystem.STREAM_BLUETOOTH_SCO, // STREAM_BLUETOOTH_SCO
         AudioSystem.STREAM_SYSTEM,  // STREAM_SYSTEM_ENFORCED
         AudioSystem.STREAM_VOICE_CALL, // STREAM_DTMF
-        AudioSystem.STREAM_MUSIC  // STREAM_TTS
+        AudioSystem.STREAM_MUSIC,  // STREAM_TTS
+        AudioSystem.STREAM_FM
     };
 
     private AudioSystem.ErrorCallback mAudioSystemCallback = new AudioSystem.ErrorCallback() {
@@ -367,13 +372,19 @@ public class AudioService extends IAudioService.Stub {
         intentFilter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
         intentFilter.addAction(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED);
         intentFilter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
+        intentFilter.addAction(TtyIntent.TTY_ENABLED_CHANGE_ACTION);
         intentFilter.addAction(Intent.ACTION_DOCK_EVENT);
         intentFilter.addAction(Intent.ACTION_USB_ANLG_HEADSET_PLUG);
-        intentFilter.addAction(Intent.ACTION_USB_DGTL_HEADSET_PLUG);
-        intentFilter.addAction(Intent.ACTION_HDMI_AUDIO_PLUG);
+        // Check if HDMI Primary and do not add ACTION_HDMI_AUDIO_PLUG intent if primary
+        if (!new File("/sys/class/graphics/fb0/hdmi_mode").exists()) {
+            intentFilter.addAction(Intent.ACTION_HDMI_AUDIO_PLUG);
+        }
+        intentFilter.addAction(Intent.ACTION_FM);
+        intentFilter.addAction(Intent.ACTION_FM_TX);
         intentFilter.addAction(Intent.ACTION_BOOT_COMPLETED);
         intentFilter.addAction(Intent.ACTION_SCREEN_ON);
         intentFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        intentFilter.addAction(Intent.ACTION_WIFI_DISPLAY);
         context.registerReceiver(mReceiver, intentFilter);
 
         // Register for package removal intent broadcasts for media button receiver persistence
@@ -465,6 +476,7 @@ public class AudioService extends IAudioService.Stub {
         mMuteAffectedStreams = System.getInt(cr,
                 System.MUTE_STREAMS_AFFECTED,
                 ((1 << AudioSystem.STREAM_MUSIC)|(1 << AudioSystem.STREAM_RING)|(1 << AudioSystem.STREAM_SYSTEM)));
+        mMuteAffectedStreams |= (1 << AudioSystem.STREAM_FM);
 
         // Each stream will read its own persisted settings
 
@@ -1762,6 +1774,9 @@ public class AudioService extends IAudioService.Stub {
             } else if (AudioSystem.isStreamActive(AudioSystem.STREAM_MUSIC, 0)) {
                 // Log.v(TAG, "getActiveStreamType: Forcing STREAM_MUSIC...");
                 return AudioSystem.STREAM_MUSIC;
+            } else if (AudioSystem.isStreamActive(AudioSystem.STREAM_FM, 0)) {
+                // Log.v(TAG, "getActiveStreamType: Forcing STREAM_FM...");
+                return AudioSystem.STREAM_FM;
             } else if (suggestedStreamType == AudioManager.USE_DEFAULT_STREAM_TYPE) {
                 // Log.v(TAG, "getActiveStreamType: Forcing STREAM_RING..."
                 //        + " b/c USE_DEFAULT_STREAM_TYPE...");
@@ -2520,44 +2535,64 @@ public class AudioService extends IAudioService.Stub {
                     }
                 }
             } else if (action.equals(Intent.ACTION_HEADSET_PLUG)) {
-                int state = intent.getIntExtra("state", 0);
-                int microphone = intent.getIntExtra("microphone", 0);
-
                 synchronized (mConnectedDevices) {
-                    if (microphone != 0) {
-                        boolean isConnected =
-                            mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_WIRED_HEADSET);
-                        if (state == 0 && isConnected) {
-                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADSET,
-                                    AudioSystem.DEVICE_STATE_UNAVAILABLE,
-                                    "");
-                            mConnectedDevices.remove(AudioSystem.DEVICE_OUT_WIRED_HEADSET);
-                        } else if (state == 1 && !isConnected)  {
-                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADSET,
-                                    AudioSystem.DEVICE_STATE_AVAILABLE,
-                                    "");
-                            mConnectedDevices.put(
-                                    new Integer(AudioSystem.DEVICE_OUT_WIRED_HEADSET), "");
-                        }
-                    } else {
-                        boolean isConnected =
-                            mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE);
-                        if (state == 0 && isConnected) {
-                            AudioSystem.setDeviceConnectionState(
-                                    AudioSystem.DEVICE_OUT_WIRED_HEADPHONE,
-                                    AudioSystem.DEVICE_STATE_UNAVAILABLE,
-                                    "");
-                            mConnectedDevices.remove(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE);
-                        } else if (state == 1 && !isConnected)  {
-                            AudioSystem.setDeviceConnectionState(
-                                    AudioSystem.DEVICE_OUT_WIRED_HEADPHONE,
-                                    AudioSystem.DEVICE_STATE_AVAILABLE,
-                                    "");
-                            mConnectedDevices.put(
-                                    new Integer(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE), "");
-                        }
-                    }
-                }
+	                int state = intent.getIntExtra("state", 0);
+	                int microphone = intent.getIntExtra("microphone", 0);
+	                int anc        = intent.getIntExtra("anc", 0);
+	                String name    = intent.getStringExtra("name");
+	                Log.e(TAG, "state = " +state +" microphone = " +microphone +" anc = " +anc);
+	                if (microphone != 0) {
+	                    boolean isConnected =
+	                        mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_WIRED_HEADSET);
+	                    boolean isancConnected =
+	                        mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_ANC_HEADSET);
+	                    Log.e(TAG, "state = " +state +" isConnected = " +isConnected +" isancConnected = " +isancConnected);
+	                    if (state == 0 && isConnected && !isancConnected) {
+	                        AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADSET,
+	                                AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
+	                        mConnectedDevices.remove(AudioSystem.DEVICE_OUT_WIRED_HEADSET);
+	                    } else if (state == 0 && isancConnected) {
+	                               AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_ANC_HEADSET,
+	                                        AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
+	                               mConnectedDevices.remove(AudioSystem.DEVICE_OUT_ANC_HEADSET);
+	                    } else if (state == 1 && !isConnected && !isancConnected) {
+	                        if(name.equalsIgnoreCase("Headset") && anc == 1 ){
+	                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_ANC_HEADSET,
+	                                    AudioSystem.DEVICE_STATE_AVAILABLE, "");
+	                            mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_ANC_HEADSET), "");
+	                        } else if(name.equalsIgnoreCase("Headset") && anc == 0) {
+	                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADSET,
+	                                    AudioSystem.DEVICE_STATE_AVAILABLE, "");
+	                            mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_WIRED_HEADSET), "");
+	                        }
+	                    }
+	                } else {
+	                    boolean isConnected =
+	                        mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE);
+	                    boolean isancConnected =
+	                        mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_ANC_HEADPHONE);
+	                    Log.e(TAG, "state = " +state +" isConnected = " +isConnected +" isancConnected = " +isancConnected);
+	                    if (state == 0 && isConnected && !isancConnected) {
+	                        AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE,
+	                                AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
+	                        mConnectedDevices.remove(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE);
+	                    } else if (state == 0 && isancConnected) {
+	                        AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_ANC_HEADPHONE,
+	                                AudioSystem.DEVICE_STATE_UNAVAILABLE, "");
+	                        mConnectedDevices.remove(AudioSystem.DEVICE_OUT_ANC_HEADPHONE);
+	                    }else if (state == 1 && !isConnected && !isancConnected)  {
+	                        if(name.equalsIgnoreCase("Headset") && anc ==1 ){
+	                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_ANC_HEADPHONE,
+	                                    AudioSystem.DEVICE_STATE_AVAILABLE, "");
+	                            mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_ANC_HEADPHONE), "");
+	                        } else if(name.equalsIgnoreCase("Headset") && anc == 0 ) {
+	                            AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE,
+	                                    AudioSystem.DEVICE_STATE_AVAILABLE, "");
+	                            mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_WIRED_HEADPHONE), "");
+	                        }
+	                    }
+	                }
+				}
             } else if (action.equals(Intent.ACTION_USB_ANLG_HEADSET_PLUG)) {
                 int state = intent.getIntExtra("state", 0);
                 Log.v(TAG, "Broadcast Receiver: Got ACTION_USB_ANLG_HEADSET_PLUG, state = "+state);
@@ -2618,6 +2653,25 @@ public class AudioService extends IAudioService.Stub {
                                 new Integer(AudioSystem.DEVICE_OUT_DGTL_DOCK_HEADSET), "");
                     }
                 }
+            } else if (action.equals(TtyIntent.TTY_ENABLED_CHANGE_ACTION)) {
+                String tty_mode;
+                switch (Settings.Secure.getInt(mContentResolver,
+                            Settings.Secure.PREFERRED_TTY_MODE,
+                            Phone.TTY_MODE_OFF)) {
+                    case Phone.TTY_MODE_FULL:
+                        tty_mode = "full";
+                        break;
+                    case Phone.TTY_MODE_VCO:
+                        tty_mode = "vco";
+                        break;
+                    case Phone.TTY_MODE_HCO:
+                        tty_mode = "hco";
+                        break;
+                    case Phone.TTY_MODE_OFF:
+                    default:
+                        tty_mode = "off";
+                }
+                AudioSystem.setParameters("tty_mode="+tty_mode);
             } else if (action.equals(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED)) {
                 boolean broadcast = false;
                 int state = AudioManager.SCO_AUDIO_STATE_ERROR;
@@ -2694,10 +2748,54 @@ public class AudioService extends IAudioService.Stub {
                         removeMediaButtonReceiverForPackage(packageName);
                     }
                 }
+            } else if (action.equals(Intent.ACTION_FM)){
+               Log.v(TAG, "FM Intent received");
+               int state = intent.getIntExtra("state", 0);
+               if(state == 1){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM,
+                            AudioSystem.DEVICE_STATE_AVAILABLE,
+                            "");
+                    mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_FM), "");
+                }else if(state == 0){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM,
+                            AudioSystem.DEVICE_STATE_UNAVAILABLE,
+                            "");
+                    mConnectedDevices.remove(AudioSystem.DEVICE_OUT_FM);
+                }
+            }else if (action.equals(Intent.ACTION_FM_TX)){
+               int state = intent.getIntExtra("state", 0);
+               Log.v(TAG, "FM Tx Intent received "+state);
+               boolean isConnected = mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_FM_TX);
+               if(state == 1 && !isConnected){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM_TX,
+                            AudioSystem.DEVICE_STATE_AVAILABLE,
+                            "");
+                    mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_FM_TX), "");
+                }else if(state == 0 && isConnected){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_FM_TX,
+                            AudioSystem.DEVICE_STATE_UNAVAILABLE,
+                            "");
+                    mConnectedDevices.remove(AudioSystem.DEVICE_OUT_FM_TX);
+                }
             } else if (action.equals(Intent.ACTION_SCREEN_ON)) {
                 AudioSystem.setParameters("screen_state=on");
             } else if (action.equals(Intent.ACTION_SCREEN_OFF)) {
                 AudioSystem.setParameters("screen_state=off");
+            }else if (action.equals(Intent.ACTION_WIFI_DISPLAY)){
+               int state = intent.getIntExtra("state", 0);
+               Log.v(TAG, "WiFi Display device state "+state);
+               boolean isConnected = mConnectedDevices.containsKey(AudioSystem.DEVICE_OUT_PROXY);
+               if(state == 1 && !isConnected){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_PROXY,
+                            AudioSystem.DEVICE_STATE_AVAILABLE,
+                            "");
+                    mConnectedDevices.put( new Integer(AudioSystem.DEVICE_OUT_PROXY), "");
+                }else if(state == 0 && isConnected){
+                    AudioSystem.setDeviceConnectionState(AudioSystem.DEVICE_OUT_PROXY,
+                            AudioSystem.DEVICE_STATE_UNAVAILABLE,
+                            "");
+                    mConnectedDevices.remove(AudioSystem.DEVICE_OUT_PROXY);
+                }
             }
         }
     }

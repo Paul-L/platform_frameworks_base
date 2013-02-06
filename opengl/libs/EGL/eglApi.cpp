@@ -65,14 +65,14 @@ static const extention_map_t sExtentionMap[] = {
             (__eglMustCastToProperFunctionPointerType)&eglCreateImageKHR },
     { "eglDestroyImageKHR",
             (__eglMustCastToProperFunctionPointerType)&eglDestroyImageKHR },
+    { "eglSetSwapRectangleANDROID",
+            (__eglMustCastToProperFunctionPointerType)&eglSetSwapRectangleANDROID },
+    { "eglGetRenderBufferANDROID",
+            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
     { "eglGetSystemTimeFrequencyNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeFrequencyNV },
     { "eglGetSystemTimeNV",
             (__eglMustCastToProperFunctionPointerType)&eglGetSystemTimeNV },
-#ifdef QCOM_HARDWARE
-    { "eglGetRenderBufferANDROID",
-            (__eglMustCastToProperFunctionPointerType)&eglGetRenderBufferANDROID },
-#endif
 };
 
 // accesses protected by sExtensionMapMutex
@@ -1447,8 +1447,26 @@ EGLBoolean eglGetSyncAttribKHR(EGLDisplay dpy, EGLSyncKHR sync, EGLint attribute
 // ----------------------------------------------------------------------------
 
 /* ANDROID extensions entry-point go here */
+EGLBoolean eglSetSwapRectangleANDROID(EGLDisplay dpy, EGLSurface draw,
+        EGLint left, EGLint top, EGLint width, EGLint height)
+{
+    clearError();
 
-#ifdef QCOM_HARDWARE
+    egl_display_t const * const dp = validate_display(dpy);
+    if (!dp) return EGL_FALSE;
+
+    SurfaceRef _s(dp, draw);
+    if (!_s.get())
+        return setError(EGL_BAD_SURFACE, EGL_FALSE);
+
+    egl_surface_t const * const s = get_surface(draw);
+    if (s->cnx->egl.eglSetSwapRectangleANDROID) {
+        return s->cnx->egl.eglSetSwapRectangleANDROID(
+                dp->disp[s->impl].dpy, s->surface, left, top, width, height);
+    }
+    return setError(EGL_BAD_DISPLAY, NULL);
+}
+
 EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
 {
     clearError();
@@ -1466,7 +1484,6 @@ EGLClientBuffer eglGetRenderBufferANDROID(EGLDisplay dpy, EGLSurface draw)
     }
     return setError(EGL_BAD_DISPLAY, (EGLClientBuffer*)0);
 }
-#endif
 
 // ----------------------------------------------------------------------------
 // NVIDIA extensions

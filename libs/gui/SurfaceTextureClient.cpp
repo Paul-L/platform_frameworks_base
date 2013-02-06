@@ -22,12 +22,20 @@
 #include <surfaceflinger/SurfaceComposerClient.h>
 
 #include <utils/Log.h>
-
-#ifdef QCOM_HARDWARE
 #include <qcom_ui.h>
-#endif
+
+#include <testframework/TestFramework.h>
 
 namespace android {
+
+#ifdef GFX_TESTFRAMEWORK
+    //holds time stats for dequeue, lock, queue operations on buffers
+    static nsecs_t sDequeueStartTime[SurfaceTexture::NUM_BUFFER_SLOTS];
+    static nsecs_t sDequeueEndTime[SurfaceTexture::NUM_BUFFER_SLOTS];
+    static nsecs_t sLockStartTime[SurfaceTexture::NUM_BUFFER_SLOTS];
+    static nsecs_t sQueueStartTime[SurfaceTexture::NUM_BUFFER_SLOTS];
+    static nsecs_t sQueueEndTime[SurfaceTexture::NUM_BUFFER_SLOTS];
+#endif
 
 SurfaceTextureClient::SurfaceTextureClient(
         const sp<ISurfaceTexture>& surfaceTexture)
@@ -63,9 +71,7 @@ void SurfaceTextureClient::init() {
     mReqHeight = 0;
     mReqFormat = 0;
     mReqUsage = 0;
-#ifdef QCOM_HARDWARE
     mReqExtUsage = 0;
-#endif
     mTimestamp = NATIVE_WINDOW_TIMESTAMP_AUTO;
     mDefaultWidth = 0;
     mDefaultHeight = 0;
@@ -136,11 +142,6 @@ int SurfaceTextureClient::setSwapInterval(int interval) {
 
     if (interval > maxSwapInterval)
         interval = maxSwapInterval;
-        
-#ifdef EGL_ALWAYS_ASYNC
-    if (mReqUsage != 0)
-        interval = 0;
-#endif
 
     status_t res = mSurfaceTexture->setSynchronousMode(interval ? true : false);
 
@@ -149,6 +150,10 @@ int SurfaceTextureClient::setSwapInterval(int interval) {
 
 int SurfaceTextureClient::dequeueBuffer(android_native_buffer_t** buffer) {
     LOGV("SurfaceTextureClient::dequeueBuffer");
+#ifdef GFX_TESTFRAMEWORK
+    nsecs_t startTime = systemTime();
+    TF_PRINT(TF_EVENT_START, "STClient", "DQ", "BUFFER:STC dequeue start");
+#endif
     Mutex::Autolock lock(mMutex);
     int buf = -1;
     status_t result = mSurfaceTexture->dequeueBuffer(&buf, mReqWidth, mReqHeight,
@@ -173,6 +178,14 @@ int SurfaceTextureClient::dequeueBuffer(android_native_buffer_t** buffer) {
         }
     }
     *buffer = gbuf.get();
+#ifdef GFX_TESTFRAMEWORK
+    sDequeueEndTime[buf] = systemTime();
+    sDequeueStartTime[buf] = startTime;
+    TF_PRINT(TF_EVENT_STOP, "STClient", "DQ",
+             "BUFFER:STC dequeue end bufSlot=%d buffer=%p",
+             buf, mSlots[buf]->handle);
+#endif
+
     return OK;
 }
 
@@ -189,6 +202,12 @@ int SurfaceTextureClient::cancelBuffer(android_native_buffer_t* buffer) {
 
 int SurfaceTextureClient::getSlotFromBufferLocked(
         android_native_buffer_t* buffer) const {
+
+    if (buffer == NULL) {
+        LOGE("getSlotFromBufferLocked: encountered NULL buffer");
+        return BAD_VALUE;
+    }
+
     bool dumpedState = false;
     for (int i = 0; i < NUM_BUFFER_SLOTS; i++) {
         // XXX: Dump the slots whenever we hit a NULL entry while searching for
@@ -218,12 +237,27 @@ int SurfaceTextureClient::getSlotFromBufferLocked(
 
 int SurfaceTextureClient::lockBuffer(android_native_buffer_t* buffer) {
     LOGV("SurfaceTextureClient::lockBuffer");
+#ifdef GFX_TESTFRAMEWORK
+    int i = getSlotFromBufferLocked(buffer);
+    char eventID[TF_EVENT_ID_SIZE_MAX];
+    snprintf(eventID, TF_EVENT_ID_SIZE_MAX, "Lock-%d", i);
+    TF_PRINT(TF_EVENT, "STClient", eventID, "BUFFER:STC lock, buffer=%p",
+             mSlots[i]->handle);
+    sLockStartTime[i] = systemTime();
+#endif
     Mutex::Autolock lock(mMutex);
     return OK;
 }
 
 int SurfaceTextureClient::queueBuffer(android_native_buffer_t* buffer) {
     LOGV("SurfaceTextureClient::queueBuffer");
+#ifdef GFX_TESTFRAMEWORK
+    char eventID[TF_EVENT_ID_SIZE_MAX];
+    int idx = getSlotFromBufferLocked(buffer);
+    snprintf(eventID, TF_EVENT_ID_SIZE_MAX, "Q-%d", idx);
+    TF_PRINT(TF_EVENT_START, "STClient", eventID, "BUFFER:STC queue start");
+    sQueueStartTime[idx] = systemTime();
+#endif
     Mutex::Autolock lock(mMutex);
     int64_t timestamp;
     if (mTimestamp == NATIVE_WINDOW_TIMESTAMP_AUTO) {
@@ -242,6 +276,22 @@ int SurfaceTextureClient::queueBuffer(android_native_buffer_t* buffer) {
     if (err != OK)  {
         LOGE("queueBuffer: error queuing buffer to SurfaceTexture, %d", err);
     }
+#ifdef GFX_TESTFRAMEWORK
+    sQueueEndTime[i] = systemTime();
+    TF_PRINT(TF_EVENT_STOP, "STClient", eventID, "BUFFER:STC queue end, buffer=%p",
+             mSlots[i]->handle);
+    {
+        int dqTime = ns2ms(sDequeueEndTime[i] - sDequeueStartTime[i]);
+        int dqToLock = ns2ms(sLockStartTime[i] - sDequeueEndTime[i]);
+        int qTime = ns2ms(sQueueEndTime[i] - sQueueStartTime[i]);
+        int renderingTime = ns2ms(sQueueStartTime[i] - sLockStartTime[i]);
+        int totalTime = ns2ms(sQueueEndTime[i] - sDequeueStartTime[i]);
+        TF_PRINT(TF_EVENT, "STClient", "GFX-Timelines", "DequeueTime %d LockTime Unk QueueTime %d "
+                 "RenderingTime %d DequeueToLockTime %d TotalTime %d bufSlot %d PID %d TID %d",
+                 dqTime, qTime, renderingTime, dqToLock, totalTime,
+                 i, getpid(), gettid());
+    }
+#endif
     return err;
 }
 
@@ -277,12 +327,7 @@ int SurfaceTextureClient::query(int what, int* value) const {
                 *value = mDefaultHeight;
                 return NO_ERROR;
             case NATIVE_WINDOW_TRANSFORM_HINT:
-#ifdef QCOM_HARDWARE
                 return mSurfaceTexture->query(what, value);
-#else
-                *value = mTransformHint;
-                return NO_ERROR;
-#endif
         }
     }
     return mSurfaceTexture->query(what, value);
@@ -338,17 +383,12 @@ int SurfaceTextureClient::perform(int operation, va_list args)
         res = dispatchDisconnect(args);
         break;
     default:
-#ifdef QCOM_HARDWARE
         res = dispatchPerformQcomOperation(operation, args);
-#else
-        res = NAME_NOT_FOUND;
-#endif
         break;
     }
     return res;
 }
 
-#ifdef QCOM_HARDWARE
 int SurfaceTextureClient::dispatchPerformQcomOperation(int operation,
                                                        va_list args) {
     int num_args = getNumberOfArgsForOperation(operation);
@@ -365,7 +405,6 @@ int SurfaceTextureClient::dispatchPerformQcomOperation(int operation,
     }
     return performQcomOperation(operation, arg[0], arg[1], arg[2]);
 }
-#endif
 
 int SurfaceTextureClient::dispatchConnect(va_list args) {
     int api = va_arg(args, int);
@@ -400,29 +439,23 @@ int SurfaceTextureClient::dispatchSetBuffersGeometry(va_list args) {
     if (err != 0) {
         return err;
     }
-#ifdef QCOM_HARDWARE
     LOGV("Resetting the Buffer size to 0 after SET GEOMETRY");
     err = performQcomOperation(NATIVE_WINDOW_SET_BUFFERS_SIZE, 0, 0, 0);
     if (err != 0) {
         return err;
     }
-#endif
     return setBuffersFormat(f);
 }
 
 int SurfaceTextureClient::dispatchSetBuffersDimensions(va_list args) {
     int w = va_arg(args, int);
     int h = va_arg(args, int);
-#ifndef QCOM_HARDWARE
-    return setBuffersDimensions(w, h);
-#else
     int err = setBuffersDimensions(w, h);
     if (err != 0) {
         return err;
     }
     LOGV("Resetting the Buffer size to 0 after SET DIMENSIONS");
     return performQcomOperation(NATIVE_WINDOW_SET_BUFFERS_SIZE, 0, 0, 0);
-#endif
 }
 
 int SurfaceTextureClient::dispatchSetBuffersFormat(va_list args) {
@@ -455,7 +488,6 @@ int SurfaceTextureClient::dispatchUnlockAndPost(va_list args) {
     return unlockAndPost();
 }
 
-#ifdef QCOM_HARDWARE
 int SurfaceTextureClient::performQcomOperation(int operation, int arg1,
                                                int arg2, int arg3) {
     LOGV("SurfaceTextureClient::performQcomOperation");
@@ -463,7 +495,6 @@ int SurfaceTextureClient::performQcomOperation(int operation, int arg1,
     int err = mSurfaceTexture->performQcomOperation(operation, arg1, arg2, arg3);
     return err;
 }
-#endif
 
 int SurfaceTextureClient::connect(int api) {
     LOGV("SurfaceTextureClient::connect");
@@ -497,7 +528,6 @@ int SurfaceTextureClient::setUsage(uint32_t reqUsage)
 {
     LOGV("SurfaceTextureClient::setUsage");
     Mutex::Autolock lock(mMutex);
-#ifdef QCOM_HARDWARE
     if (reqUsage & GRALLOC_USAGE_EXTERNAL_ONLY) {
         //Set explicitly, since reqUsage may have other values.
         mReqExtUsage = GRALLOC_USAGE_EXTERNAL_ONLY;
@@ -513,9 +543,6 @@ int SurfaceTextureClient::setUsage(uint32_t reqUsage)
     // the existing values. We cache certain values in mReqExtUsage
     // to avoid being overwritten.
     mReqUsage = reqUsage | mReqExtUsage;
-#else
-    mReqUsage = reqUsage;
-#endif
     return OK;
 }
 
@@ -719,16 +746,13 @@ status_t SurfaceTextureClient::lock(
                     backBuffer->height == frontBuffer->height &&
                     backBuffer->format == frontBuffer->format);
 
-#ifdef QCOM_HARDWARE
             int bufferCount;
 
             mSurfaceTexture->query(NATIVE_WINDOW_NUM_BUFFERS, &bufferCount);
             const int backBufferidx = getSlotFromBufferLocked(out);
-#endif
 
             if (canCopyBack) {
                 // copy the area that is invalid and not repainted this round
-#ifdef QCOM_HARDWARE
                 Region oldDirtyRegion;
                 for(int i = 0 ; i < bufferCount; i++ ) {
                     if(i != backBufferidx  && !mOldDirtyRegion[i].isEmpty())
@@ -736,29 +760,20 @@ status_t SurfaceTextureClient::lock(
                 }
 
                 const Region copyback(oldDirtyRegion.subtract(newDirtyRegion));
-#else
-                const Region copyback(mOldDirtyRegion.subtract(newDirtyRegion));
-#endif
                 if (!copyback.isEmpty())
                     copyBlt(backBuffer, frontBuffer, copyback);
             } else {
                 // if we can't copy-back anything, modify the user's dirty
                 // region to make sure they redraw the whole buffer
                 newDirtyRegion.set(bounds);
-#ifdef QCOM_HARDWARE
                 for(int i = 0 ; i < bufferCount; i++ ) {
                      mOldDirtyRegion[i].clear();
                 }
-#endif
             }
 
             // keep track of the are of the buffer that is "clean"
             // (ie: that will be redrawn)
-#ifdef QCOM_HARDWARE
             mOldDirtyRegion[backBufferidx] = newDirtyRegion;
-#else
-            mOldDirtyRegion = newDirtyRegion;
-#endif
 
             if (inOutDirtyBounds) {
                 *inOutDirtyBounds = newDirtyRegion.getBounds();

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 The Android Open Source Project
+ * Copyright (c) 2010-2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +33,13 @@ import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.net.ConnectivityManager;
+import android.net.FmcNotifier;
 import android.net.DummyDataStateTracker;
 import android.net.EthernetDataTracker;
 import android.net.IConnectivityManager;
+import android.net.LinkCapabilities;
+import android.net.ExtraLinkCapabilities;
+import android.net.IFmcEventListener;
 import android.net.INetworkPolicyListener;
 import android.net.INetworkPolicyManager;
 import android.net.INetworkStatsService;
@@ -99,6 +104,11 @@ import java.util.Collection;
 import java.util.GregorianCalendar;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+
+import dalvik.system.PathClassLoader;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 
 /**
  * @hide
@@ -106,7 +116,7 @@ import java.util.List;
 public class ConnectivityService extends IConnectivityManager.Stub {
 
     private static final boolean DBG = true;
-    private static final boolean VDBG = false;
+    private static final boolean VDBG = true;
     private static final String TAG = "ConnectivityService";
 
     private static final boolean LOGD_RULES = false;
@@ -168,6 +178,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     private Object mDnsLock = new Object();
     private int mNumDnsEntries;
     private boolean mDnsOverridden = false;
+    private static int mRouteIdCtr = 0;
 
     private boolean mTestMode;
     private static ConnectivityService sServiceInstance;
@@ -274,6 +285,12 @@ public class ConnectivityService extends IConnectivityManager.Stub {
 
     private Handler mHandler;
 
+    private ILinkManager mLinkManager = null;
+    private Object mCneObj = null;
+    private boolean mCneStarted = false;
+    private static final String UseCne = "persist.cne.UseCne";
+    private QosManager qosManager = null;
+
     // list of DeathRecipients used to make sure features are turned off when
     // a process dies
     private List<FeatureUser> mFeatureUsers;
@@ -321,8 +338,31 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     }
     RadioAttributes[] mRadioAttributes;
 
+    private class RouteAttributes {
+        /**
+         * Class for holding identifiers used to create custom tables for source
+         * policy routing in the kernel.
+         * Max allowable custom tables is 253 with 0 set to local and 254 set to
+         * main table. Anything in between is valid.
+         */
+        public int v4TableId;
+        public int v6TableId;
+        public RouteAttributes () {
+            //We are assuming that MAX network types supported on android won't
+            //exceed 126 in which case identifier assignment needs to change. Its
+            //safe to do it this way for now.
+            v4TableId = ++mRouteIdCtr;
+            v6TableId = ++mRouteIdCtr;
+        }
+    }
+    RouteAttributes[]  mRouteAttributes;
+
     // the set of network types that can only be enabled by system/sig apps
     List mProtectedNetworks;
+
+    private FmcStateMachine mFmcSM = null;
+    private IFmcEventListener mListener = null;
+    private boolean mFmcEnabled = false;
 
     public ConnectivityService(Context context, INetworkManagementService netd,
             INetworkStatsService statsService, INetworkPolicyManager policyManager) {
@@ -380,6 +420,10 @@ public class ConnectivityService extends IConnectivityManager.Stub {
 
         mRadioAttributes = new RadioAttributes[ConnectivityManager.MAX_RADIO_TYPE+1];
         mNetConfigs = new NetworkConfig[ConnectivityManager.MAX_NETWORK_TYPE+1];
+        mRouteAttributes = new RouteAttributes[ConnectivityManager.MAX_NETWORK_TYPE+1];
+        for (int i = 0; i < ConnectivityManager.MAX_NETWORK_TYPE+1; i++) {
+            mRouteAttributes[i] = new RouteAttributes();
+        }
 
         // Load device network attributes from resources
         String[] raStrings = context.getResources().getStringArray(
@@ -1788,9 +1832,13 @@ private NetworkStateTracker makeWimaxStateTracker() {
         boolean isFailover = info.isFailover();
         final NetworkStateTracker thisNet = mNetTrackers[type];
 
+        if (mFmcEnabled) {
+            if (DBG) log("Not tearing down WWAN because FMC enabled");
+        }
+
         // if this is a default net and other default is running
         // kill the one not preferred
-        if (mNetConfigs[type].isDefault()) {
+        if (mNetConfigs[type].isDefault() && !(mFmcEnabled)) {
             if (mActiveDefaultNetwork != -1 && mActiveDefaultNetwork != type) {
                 if ((type != mNetworkPreference &&
                         mNetConfigs[mActiveDefaultNetwork].priority >
@@ -1875,6 +1923,7 @@ private NetworkStateTracker makeWimaxStateTracker() {
 
         if (mNetTrackers[netType].getNetworkInfo().isConnected()) {
             newLp = mNetTrackers[netType].getLinkProperties();
+
             if (VDBG) {
                 log("handleConnectivityChange: changed linkProperty[" + netType + "]:" +
                         " doReset=" + doReset + " resetMask=" + resetMask +
@@ -1927,7 +1976,8 @@ private NetworkStateTracker makeWimaxStateTracker() {
             }
         }
         mCurrentLinkProperties[netType] = newLp;
-        boolean resetDns = updateRoutes(newLp, curLp, mNetConfigs[netType].isDefault());
+        boolean resetDns = updateRoutes(newLp, curLp, mNetConfigs[netType].isDefault(),
+                mRouteAttributes[netType]);
 
         if (resetMask != 0 || resetDns) {
             LinkProperties linkProperties = mNetTrackers[netType].getLinkProperties();
@@ -1963,7 +2013,7 @@ private NetworkStateTracker makeWimaxStateTracker() {
         if (TextUtils.equals(mNetTrackers[netType].getNetworkInfo().getReason(),
                              Phone.REASON_LINK_PROPERTIES_CHANGED)) {
             if (isTetheringSupported()) {
-                mTethering.handleTetherIfaceChange();
+                mTethering.handleTetherIfaceChange(mNetTrackers[netType].getNetworkInfo());
             }
         }
     }
@@ -1977,19 +2027,23 @@ private NetworkStateTracker makeWimaxStateTracker() {
      * returns a boolean indicating the routes changed
      */
     private boolean updateRoutes(LinkProperties newLp, LinkProperties curLp,
-            boolean isLinkDefault) {
+            boolean isLinkDefault, RouteAttributes ra) {
         Collection<RouteInfo> routesToAdd = null;
         CompareResult<InetAddress> dnsDiff = new CompareResult<InetAddress>();
         CompareResult<RouteInfo> routeDiff = new CompareResult<RouteInfo>();
+        CompareResult<LinkAddress> localAddrDiff = new CompareResult<LinkAddress>();
         if (curLp != null) {
             // check for the delta between the current set and the new
             routeDiff = curLp.compareRoutes(newLp);
             dnsDiff = curLp.compareDnses(newLp);
+            localAddrDiff = curLp.compareAddresses(newLp);
         } else if (newLp != null) {
             routeDiff.added = newLp.getRoutes();
             dnsDiff.added = newLp.getDnses();
+            localAddrDiff.added = newLp.getLinkAddresses();
         }
 
+        // linkaddress change does not affect dns, so exclude it from this condition.
         boolean routesChanged = (routeDiff.removed.size() != 0 || routeDiff.added.size() != 0);
 
         for (RouteInfo r : routeDiff.removed) {
@@ -2023,6 +2077,48 @@ private NetworkStateTracker makeWimaxStateTracker() {
                 }
             }
         }
+
+        if (localAddrDiff.removed.size() != 0) {
+            for (LinkAddress la : localAddrDiff.removed) {
+                if (VDBG) log("Removing src route for:" + la.getAddress().getHostAddress());
+                try {
+                    if (la.getAddress() instanceof Inet4Address)
+                        mNetd.delV4SrcRoute(ra.v4TableId);
+                    else
+                        mNetd.delV6SrcRoute(ra.v6TableId);
+                } catch (Exception e) {
+                    // never crash - catch them all
+                    if (VDBG) loge("Exception trying to remove src route: " + e);
+                }
+            }
+        }
+
+        if (localAddrDiff.added.size() != 0) {
+            String gw4Str = null, gw6Str = null, localAddr = null;
+            String ifaceName = newLp.getInterfaceName();
+            if (! TextUtils.isEmpty(ifaceName)) {
+                for (RouteInfo r : newLp.getRoutes()) {
+                    if (! r.isDefaultRoute()) continue;
+                    if (r.getGateway() instanceof Inet4Address)
+                        gw4Str = r.getGateway().getHostAddress();
+                    else
+                        gw6Str = r.getGateway().getHostAddress();
+                } //gateway is optional so continue adding the source route.
+                for (LinkAddress la : localAddrDiff.added) {
+                    try {
+                        localAddr = la.getAddress().getHostAddress();
+                        if (la.getAddress() instanceof Inet4Address)
+                            mNetd.replaceV4SrcRoute(ifaceName, localAddr, gw4Str, ra.v4TableId);
+                        else
+                            mNetd.replaceV6SrcRoute(ifaceName, localAddr, gw6Str, ra.v6TableId);
+                    } catch (Exception e) {
+                        // never crash - catch them all
+                        if (VDBG) loge("Exception trying to add a src route: " + e);
+                    }
+                }
+            }
+        }
+
 
         if (!isLinkDefault) {
             // handle DNS routes
@@ -2158,8 +2254,9 @@ private NetworkStateTracker makeWimaxStateTracker() {
             String dnsString = dns.getHostAddress();
             if (changed || !dnsString.equals(SystemProperties.get("net.dns" + j + "." + pid))) {
                 changed = true;
-                SystemProperties.set("net.dns" + j++ + "." + pid, dns.getHostAddress());
+                SystemProperties.set("net.dns" + j + "." + pid, dns.getHostAddress());
             }
+            j++;
         }
         return changed;
     }
@@ -3024,5 +3121,301 @@ private NetworkStateTracker makeWimaxStateTracker() {
                 }
             }
         }
+    }
+
+    /* CNE related methods. */
+    public void startCne() {
+        if (!mCneStarted) {
+            qosManager = new QosManager(mContext, this);
+            if (isCneAware()) {
+                Slog.v(TAG, "CNE is starting up");
+                mCneObj = makeVendorCne(qosManager);
+                mCneStarted = (mCneObj == null) ? false : true;
+                mLinkManager = (ILinkManager) mCneObj;
+            } else {
+                Slog.v(TAG, "CNE is disabled.");
+            }
+        } else {
+            Slog.e(TAG, "CNE already Started");
+        }
+    }
+
+    private Object makeVendorCne(QosManager qosMgr) {
+        try {
+            PathClassLoader cneClassLoader =
+                new PathClassLoader("/system/framework/com.quicinc.cne.jar",
+                                    ClassLoader.getSystemClassLoader());
+            Class cneClass = cneClassLoader.loadClass("com.quicinc.cne.CNE");
+            Constructor cneConstructor = cneClass.getConstructor
+                        (new Class[] {Context.class,ConnectivityService.class,QosManager.class});
+                return cneConstructor.newInstance(mContext,this,qosMgr);
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (InstantiationException e) {
+                e.printStackTrace();
+            } catch(IllegalAccessException e) {
+                e.printStackTrace();
+            } catch(InvocationTargetException e) {
+                e.printStackTrace();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        Slog.e(TAG,"Could not make vendor Cne obj falling back to reference cne");
+        return null;
+    }
+
+    /** @hide
+     * Has CNE been started on this device?
+     * @return true of CNE has been started, otherwise false
+     */
+    public boolean isCneStarted() {
+        return mCneStarted;
+    }
+
+    /** @hide
+     * Check if this android device is CNE aware.
+     * @return true if CNE is enabled on this device, otherwise false
+     */
+    public boolean isCneAware() {
+        boolean isUsingVendorCne =
+            SystemProperties.get(UseCne, "none").equalsIgnoreCase("vendor");
+        return (isUsingVendorCne);
+    }
+    /*
+     * LinkSocket code is below here.
+     */
+
+    /**
+     * Starts the process of getting a new link for the LinkSocket in a different thread.
+     *
+     *  @return A unique id that the socket will use for further communication.
+     */
+    public int requestLink(LinkCapabilities capabilities, String remoteIPAddress, IBinder binder) {
+        if (VDBG) log("requestLink(capabilities, callback)");
+        if (mCneStarted == false) return 0;
+        return mLinkManager.requestLink(capabilities, remoteIPAddress, binder);
+    }
+
+    /**
+     * Dissociates a LinkSocket with a given link.
+     */
+    public void releaseLink(int id) {
+        if (VDBG) log("releaseLink(id=" + id + ")");
+        if (mCneStarted == false) return;
+        mLinkManager.releaseLink(id);
+    }
+
+    /**
+     * Triggers QoS transaction using the specified local port
+     */
+    public boolean requestQoS(int id, int localPort, String localAddress) {
+        if (VDBG) log("requestQoS(aport)");
+        if (mCneStarted == false) return false;
+        return mLinkManager.requestQoS(id, localPort, localAddress);
+    }
+
+    /**
+     * Triggers QoS suspend
+     */
+    public boolean suspendQoS(int id) {
+        if (VDBG) log("suspendQoS()");
+        if (mCneStarted == false) return false;
+        return mLinkManager.suspendQoS(id);
+    }
+
+    /**
+     * Triggers QoS resume
+     */
+    public boolean resumeQoS(int id) {
+        if (VDBG) log("resumeQoS()");
+        if (mCneStarted == false) return false;
+        return mLinkManager.resumeQoS(id);
+    }
+
+    /**
+     * Removes Qos Registration from link manager
+     */
+    public boolean removeQosRegistration(int id) {
+        if (VDBG) log("removeQosRegistration");
+        if (mCneStarted == false) return false;
+        return mLinkManager.removeQosRegistration(id);
+    }
+
+    public LinkCapabilities requestCapabilities(int id, int[] capability_keys) {
+        if (VDBG) log("requestCapabilities(id=" + id + ", capabilities)");
+        if (mCneStarted == false) return null;
+
+        int netType;
+        ExtraLinkCapabilities cap = new ExtraLinkCapabilities();
+        for (int key : capability_keys) {
+            String temp = null;
+            switch (key) {
+                case LinkCapabilities.Key.RO_MIN_AVAILABLE_FWD_BW:
+                    if ((temp = mLinkManager.getMinAvailableForwardBandwidth(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_MIN_AVAILABLE_FWD_BW,temp);
+                    break;
+                case LinkCapabilities.Key.RO_MAX_AVAILABLE_FWD_BW:
+                    if ((temp = mLinkManager.getMaxAvailableForwardBandwidth(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_MAX_AVAILABLE_FWD_BW, temp);
+                    break;
+                case LinkCapabilities.Key.RO_MIN_AVAILABLE_REV_BW:
+                    if ((temp = mLinkManager.getMinAvailableReverseBandwidth(id)) != null)
+                       cap.put(LinkCapabilities.Key.RO_MIN_AVAILABLE_REV_BW, temp);
+                    break;
+                case LinkCapabilities.Key.RO_MAX_AVAILABLE_REV_BW:
+                    if ((temp = mLinkManager.getMaxAvailableReverseBandwidth(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_MAX_AVAILABLE_REV_BW, temp);
+                    break;
+                case LinkCapabilities.Key.RO_CURRENT_FWD_LATENCY:
+                    if ((temp = mLinkManager.getCurrentFwdLatency(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_CURRENT_FWD_LATENCY, temp);
+                    break;
+                case LinkCapabilities.Key.RO_CURRENT_REV_LATENCY:
+                    if ((temp = mLinkManager.getCurrentRevLatency(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_CURRENT_REV_LATENCY, temp);
+                    break;
+                case LinkCapabilities.Key.RO_NETWORK_TYPE:
+                    cap.put(LinkCapabilities.Key.RO_NETWORK_TYPE,
+                            Integer.toString(mLinkManager.getNetworkType(id)));
+                    break;
+                case LinkCapabilities.Key.RO_BOUND_INTERFACE:
+                    netType = mLinkManager.getNetworkType(id);
+                    if (netType > 0) {
+                        cap.put(LinkCapabilities.Key.RO_BOUND_INTERFACE,
+                                mNetTrackers[netType].getLinkProperties().getInterfaceName());
+                    } else {
+                        cap.put(LinkCapabilities.Key.RO_BOUND_INTERFACE, "unknown");
+                    }
+                    break;
+                case LinkCapabilities.Key.RO_PHYSICAL_INTERFACE:
+                    netType = mLinkManager.getNetworkType(id);
+                    if (netType > 0) {
+                        cap.put(LinkCapabilities.Key.RO_PHYSICAL_INTERFACE,
+                                mNetTrackers[netType].getLinkProperties().getInterfaceName());
+                    } else {
+                        cap.put(LinkCapabilities.Key.RO_PHYSICAL_INTERFACE, "unknown");
+                    }
+                    break;
+               case LinkCapabilities.Key.RO_QOS_STATE:
+                    if ((temp = mLinkManager.getQosState(id)) != null)
+                        cap.put(LinkCapabilities.Key.RO_QOS_STATE, temp);
+                    break;
+            }
+        }
+        return cap;
+    }
+
+    public void setTrackedCapabilities(int id, int[] capabilities) {
+        if (VDBG) log("setTrackedCapabilities(id=" + id + ", capabilities)");
+    }
+
+    /* Used by FmcProvider to start FMC */
+    public boolean startFmc(IBinder listener) {
+        ConnectivityManager cm = (ConnectivityManager) mContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo networkInfo = cm.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        NetworkInfo.State networkState = (networkInfo == null ? NetworkInfo.State.UNKNOWN : networkInfo.getState());
+
+        mListener = (IFmcEventListener) IFmcEventListener.Stub.asInterface(listener);
+
+        if (networkState != NetworkInfo.State.CONNECTED) {
+            try {
+                mListener.onFmcStatus(FmcNotifier.FMC_STATUS_FAILURE);
+                return false;
+            } catch (RemoteException e) {
+                Slog.d(TAG, "RemoteException " + e.getMessage());
+            }
+        }
+
+        mFmcSM = FmcStateMachine.create(mContext, mListener, this);
+        if (mFmcSM != null) {
+            try {
+                mListener.onFmcStatus(mFmcSM.getStatus());
+            } catch (RemoteException e) {
+                Slog.d(TAG, "RemoteException " + e.getMessage());
+            }
+            mFmcEnabled = mFmcSM.startFmc();
+            Slog.d(TAG, "mFmcEnabled=" + mFmcEnabled);
+            return mFmcEnabled;
+        } else {
+            Slog.d(TAG, "mFmcSM is null while calling startFmc");
+            return false;
+        }
+    }
+
+    /* Used by FmcProvider stop FMC */
+    public boolean stopFmc(IBinder listener) {
+        setFmcDisabled();
+        if (mFmcSM != null) {
+            return mFmcSM.stopFmc();
+        } else {
+            Slog.d(TAG, "mFmcSM is null while calling stopFmc");
+            return false;
+        }
+    }
+
+    /* Used by FmcProvider to get FMC status */
+    public int getFmcStatus(IBinder listener) {
+        if(mFmcSM != null) {
+            return mFmcSM.getStatus();
+        } else {
+            Slog.d(TAG, "mFmcSM is null while calling startFmc");
+            return -1;
+        }
+    }
+
+    /* Used by FmcStateMachine to control network connections */
+    public void setFmcDisabled() {
+        mFmcEnabled = false;
+        Slog.d(TAG, "mFmcEnabled=" + mFmcEnabled);
+    }
+
+    /* Used by FmcStateMachine to control network connections */
+    public boolean bringUpRat(int ratType) {
+        Slog.d(TAG, "BringUpRat called for ratType=" + ratType);
+
+        if (ratType == ConnectivityManager.TYPE_MOBILE) {
+            if (!getMobileDataEnabled()) {
+                if (DBG) Slog.d(TAG, "mobile data service disabled");
+                reconnect(ratType);
+                return false;
+            }
+        } else if (ratType != ConnectivityManager.TYPE_WIFI) {
+            return false;
+        } else {
+            Slog.d(TAG, "Unknown RatType = " + ratType);
+            return false;
+        }
+
+        return reconnect(ratType);
+    }
+
+    /* Used by FmcStateMachine to control network connections */
+    public boolean bringDownRat(int ratType) {
+        Slog.d(TAG, "BringDownRat called for ratType=" + ratType);
+
+        if (ratType == ConnectivityManager.TYPE_MOBILE) {
+            NetworkStateTracker network = mNetTrackers[ratType];
+            teardown(network);
+            return true;
+        } else if (ratType != ConnectivityManager.TYPE_WIFI) {
+            return false;
+        } else {
+            Slog.d(TAG, "Unknown RatType = " + ratType);
+            return false;
+        }
+    }
+
+    /* Used by FmcStateMachine to control network connections */
+    public boolean reconnect(int networkType) {
+        NetworkStateTracker network = mNetTrackers[networkType];
+        try{
+            network.setTeardownRequested(true);
+            Slog.d(TAG, "Sending Network Connection Request to Driver.");
+            return network.reconnect();
+        } catch(NullPointerException e){
+            Slog.d(TAG, "network Obj is Null" + e);
+            e.printStackTrace();
+        }
+        return false;
     }
 }

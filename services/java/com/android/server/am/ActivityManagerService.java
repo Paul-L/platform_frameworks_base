@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006-2008 The Android Open Source Project
+ * Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +18,7 @@
 package com.android.server.am;
 
 import com.android.internal.R;
+import com.android.internal.telephony.cat.AppInterface;
 import com.android.internal.os.BatteryStatsImpl;
 import com.android.internal.os.ProcessStats;
 import com.android.server.AttributeCache;
@@ -118,6 +120,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.WindowManagerPolicy;
+import android.content.BroadcastReceiver;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -412,6 +415,9 @@ public final class ActivityManagerService extends ActivityManagerNative
      */
     ProcessRecord mHomeProcess;
     
+
+    private boolean mScreenStatusRequest = false;
+
     /**
      * This is the process holding the activity the user last visited that
      * is in a different process from the one they are currently in.
@@ -2480,6 +2486,19 @@ public final class ActivityManagerService extends ActivityManagerNative
         }
     }
 
+    /* Checks for the last activity.If it was home then send an intent to stk */
+    private void checkScreenIdle() {
+        int top = mMainStack.mHistory.size() - 1;
+        if (top >= 0) {
+            ActivityRecord p = (ActivityRecord)mMainStack.mHistory.get(top - 1);
+            if (p.intent.hasCategory(Intent.CATEGORY_HOME)) {
+                Intent StkIntent = new Intent(AppInterface.CAT_IDLE_SCREEN_ACTION);
+                StkIntent.putExtra("SCREEN_IDLE", true);
+                mContext.sendBroadcast(StkIntent);
+            }
+        }
+    }
+
     /**
      * This is the internal entry point for handling Activity.finish().
      * 
@@ -2491,6 +2510,11 @@ public final class ActivityManagerService extends ActivityManagerNative
      */
     public final boolean finishActivity(IBinder token, int resultCode, Intent resultData) {
         // Refuse possible leaked file descriptors
+        // When an activity ends check if the top is home activity.
+        if (mScreenStatusRequest) {
+            checkScreenIdle();
+        }
+
         if (resultData != null && resultData.hasFileDescriptors() == true) {
             throw new IllegalArgumentException("File descriptors passed in Intent");
         }
@@ -2991,7 +3015,7 @@ public final class ActivityManagerService extends ActivityManagerNative
     }
 
     final void logAppTooSlow(ProcessRecord app, long startTime, String msg) {
-        if (true || IS_USER_BUILD) {
+        if (IS_USER_BUILD) {
             return;
         }
         String tracesPath = SystemProperties.get("dalvik.vm.stack-trace-file", null);
@@ -3198,7 +3222,24 @@ public final class ActivityManagerService extends ActivityManagerNative
                     activity != null ? activity.shortComponentName : null,
                     annotation != null ? "ANR " + annotation : "ANR",
                     info.toString());
-    
+
+            String tracesPath = SystemProperties.get("dalvik.vm.stack-trace-file", null);
+            if (tracesPath != null && tracesPath.length() != 0) {
+                File traceRenameFile = new File(tracesPath);
+                String newTracesPath;
+                int lpos = tracesPath.lastIndexOf (".");
+                if (-1 != lpos)
+                    newTracesPath = tracesPath.substring (0, lpos) + "_" + app.processName + tracesPath.substring (lpos);
+                else
+                    newTracesPath = tracesPath + "_" + app.processName;
+                traceRenameFile.renameTo(new File(newTracesPath));
+
+                Process.sendSignal(app.pid, 6);
+                SystemClock.sleep(1000);
+                Process.sendSignal(app.pid, 6);
+                SystemClock.sleep(1000);
+            }
+
             // Bring up the infamous App Not Responding dialog
             Message msg = Message.obtain();
             HashMap map = new HashMap();
@@ -5612,6 +5653,8 @@ public final class ActivityManagerService extends ActivityManagerNative
             final long origId = Binder.clearCallingIdentity();
             int taskId = getTaskForActivityLocked(token, !nonRoot);
             if (taskId >= 0) {
+                if (mScreenStatusRequest)
+                    checkScreenIdle();
                 return mMainStack.moveTaskToBackLocked(taskId, null);
             }
             Binder.restoreCallingIdentity(origId);
@@ -5631,6 +5674,10 @@ public final class ActivityManagerService extends ActivityManagerNative
             final long origId = Binder.clearCallingIdentity();
             moveTaskBackwardsLocked(task);
             Binder.restoreCallingIdentity(origId);
+        }
+        // When an activity is moved to back check if the top is home activity.
+        if (mScreenStatusRequest) {
+            checkScreenIdle();
         }
     }
 
@@ -7015,9 +7062,13 @@ public final class ActivityManagerService extends ActivityManagerNative
             mProcessesReady = true;
         }
         
+
         Slog.i(TAG, "System now ready");
         EventLog.writeEvent(EventLogTags.BOOT_PROGRESS_AMS_READY,
             SystemClock.uptimeMillis());
+        IntentFilter bootFilter = new IntentFilter(AppInterface.CHECK_SCREEN_IDLE_ACTION);
+        mContext.registerReceiver(new ScreenStatusReceiver(),bootFilter);
+
 
         synchronized(this) {
             // Make sure we have no pre-ready processes sitting around.
@@ -7096,6 +7147,33 @@ public final class ActivityManagerService extends ActivityManagerNative
             mMainStack.resumeTopActivityLocked(null);
         }
     }
+
+    class ScreenStatusReceiver extends BroadcastReceiver {
+
+        @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent.getAction().equals(AppInterface.CHECK_SCREEN_IDLE_ACTION)) {
+                    mScreenStatusRequest  = intent.getBooleanExtra("SCREEN_STATUS_REQUEST",false);
+                    if (mScreenStatusRequest) {
+                        Slog.i(ActivityManagerService.TAG, "Screen Status request is ON");
+                        int top = mMainStack.mHistory.size() - 1;
+                        if (top >= 0) {
+                            Intent StkIntent = new Intent(AppInterface.CAT_IDLE_SCREEN_ACTION);
+                            ActivityRecord p = (ActivityRecord)mMainStack.mHistory.get(top);
+                            if (p.intent.hasCategory(Intent.CATEGORY_HOME)) {
+                                StkIntent.putExtra("SCREEN_IDLE",true);
+                            } else {
+                                StkIntent.putExtra("SCREEN_IDLE",false);
+                            }
+                            mContext.sendBroadcast(StkIntent);
+                        }
+                    } else {
+                        Slog.i(ActivityManagerService.TAG, "Screen Status request is OFF");
+                    }
+                }
+            }
+    }
+
 
     private boolean makeAppCrashingLocked(ProcessRecord app,
             String shortMsg, String longMsg, String stackTrace) {

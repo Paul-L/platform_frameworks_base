@@ -29,14 +29,11 @@
 #include <cutils/log.h>
 
 #include <EGL/egl.h>
+#include <qcom_ui.h>
 
 #include "LayerBase.h"
 #include "HWComposer.h"
 #include "SurfaceFlinger.h"
-
-#ifdef QCOM_HARDWARE
-#include <qcom_ui.h>
-#endif
 
 namespace android {
 // ---------------------------------------------------------------------------
@@ -103,10 +100,8 @@ status_t HWComposer::createWorkList(size_t numLayers) {
 }
 
 status_t HWComposer::prepare() const {
-#ifdef QCOM_HARDWARE
     // Reset the Skip composition flag
     mList->flags &= ~HWC_SKIP_COMPOSITION;
-#endif
     int err = mHwc->prepare(mHwc, mList);
     if (err == NO_ERROR) {
         size_t numOVLayers = 0;
@@ -124,12 +119,10 @@ status_t HWComposer::prepare() const {
                 case HWC_FRAMEBUFFER:
                     numFBLayers++;
                     break;
-#ifdef QCOM_HARDWARE
                 default:
                     if(isUpdatingFB((HWCCompositionType)l.compositionType))
                         numFBLayers++;
                     break;
-#endif
             }
         }
         mNumOVLayers = numOVLayers;
@@ -182,11 +175,9 @@ hwc_layer_t* HWComposer::getLayers() const {
     return mList ? mList->hwLayers : 0;
 }
 
-#ifdef QCOM_HARDWARE
 uint32_t HWComposer::getFlags() const {
     return mList ? mList->flags : 0;
 }
-#endif
 
 void HWComposer::dump(String8& result, char* buffer, size_t SIZE,
         const Vector< sp<LayerBase> >& visibleLayersSortedByZ) const {
@@ -212,13 +203,8 @@ void HWComposer::dump(String8& result, char* buffer, size_t SIZE,
             }
             snprintf(buffer, SIZE,
                     " %8s | %08x | %08x | %08x | %02x | %05x | %08x | [%5d,%5d,%5d,%5d] | [%5d,%5d,%5d,%5d] %s\n",
-#ifdef QCOM_HARDWARE
                     l.compositionType ? (l.compositionType == HWC_OVERLAY ? "OVERLAY" : "COPYBIT") : "FB",
                     intptr_t(l.handle), l.hints, l.flags, l.transform & FINAL_TRANSFORM_MASK, l.blending, format,
-#else
-                    l.compositionType ? "OVERLAY" : "FB",
-                    intptr_t(l.handle), l.hints, l.flags, l.transform, l.blending, format,
-#endif
                     l.sourceCrop.left, l.sourceCrop.top, l.sourceCrop.right, l.sourceCrop.bottom,
                     l.displayFrame.left, l.displayFrame.top, l.displayFrame.right, l.displayFrame.bottom,
                     layer->getName().string());
@@ -231,13 +217,10 @@ void HWComposer::dump(String8& result, char* buffer, size_t SIZE,
     }
 }
 
-#ifdef QCOM_HARDWARE
 void HWComposer::perform(int event, int value) {
     if (mHwc) {
         mHwc->perform(mHwc, event, value);
     }
 }
-#endif
-
 // ---------------------------------------------------------------------------
 }; // namespace android

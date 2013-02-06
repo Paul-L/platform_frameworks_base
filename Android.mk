@@ -90,6 +90,12 @@ LOCAL_SRC_FILES += \
 	core/java/android/bluetooth/IBluetooth.aidl \
 	core/java/android/bluetooth/IBluetoothA2dp.aidl \
 	core/java/android/bluetooth/IBluetoothCallback.aidl \
+	core/java/android/bluetooth/IBluetoothGattService.aidl \
+	core/java/android/bluetooth/IBluetoothGattProfile.aidl \
+	core/java/android/bluetooth/IBluetoothGattCallback.aidl \
+	core/java/android/bluetooth/IBluetoothThermometerCallBack.aidl \
+	core/java/android/bluetooth/IBluetoothThermometerServices.aidl \
+	core/java/android/bluetooth/IBluetoothLEProximityServices.aidl \
 	core/java/android/bluetooth/IBluetoothHeadset.aidl \
 	core/java/android/bluetooth/IBluetoothHealthCallback.aidl \
 	core/java/android/bluetooth/IBluetoothPbap.aidl \
@@ -111,7 +117,9 @@ LOCAL_SRC_FILES += \
 	core/java/android/database/IContentObserver.aidl \
 	core/java/android/hardware/usb/IUsbManager.aidl \
 	core/java/android/net/IConnectivityManager.aidl \
+	core/java/android/net/IFmcEventListener.aidl \
 	core/java/android/net/INetworkManagementEventObserver.aidl \
+	core/java/android/net/ILinkSocketMessageHandler.aidl \
 	core/java/android/net/IThrottleManager.aidl \
 	core/java/android/net/INetworkPolicyListener.aidl \
 	core/java/android/net/INetworkPolicyManager.aidl \
@@ -123,6 +131,7 @@ LOCAL_SRC_FILES += \
 	core/java/android/os/IHardwareService.aidl \
 	core/java/android/os/IMessenger.aidl \
 	core/java/android/os/INetworkManagementService.aidl \
+	core/java/android/os/IHDMIService.aidl  \
 	core/java/android/os/IPermissionController.aidl \
 	core/java/android/os/IPowerManager.aidl \
 	core/java/android/os/IRemoteCallback.aidl \
@@ -174,7 +183,10 @@ LOCAL_SRC_FILES += \
 	keystore/java/android/security/IKeyChainService.aidl \
 	location/java/android/location/ICountryDetector.aidl \
 	location/java/android/location/ICountryListener.aidl \
+	core/java/com/android/internal/atfwd/IAtCmdFwd.aidl \
 	location/java/android/location/IGeocodeProvider.aidl \
+	location/java/android/location/IGeoFencer.aidl \
+	location/java/android/location/IGeoFenceListener.aidl \
 	location/java/android/location/IGpsStatusListener.aidl \
 	location/java/android/location/IGpsStatusProvider.aidl \
 	location/java/android/location/ILocationListener.aidl \
@@ -189,10 +201,15 @@ LOCAL_SRC_FILES += \
 	media/java/android/media/IRemoteControlDisplay.aidl \
 	telephony/java/com/android/internal/telephony/IPhoneStateListener.aidl \
 	telephony/java/com/android/internal/telephony/IPhoneSubInfo.aidl \
+	telephony/java/com/android/internal/telephony/IPhoneSubInfoMSim.aidl \
 	telephony/java/com/android/internal/telephony/ITelephony.aidl \
+	telephony/java/com/android/internal/telephony/ITelephonyMSim.aidl \
 	telephony/java/com/android/internal/telephony/ITelephonyRegistry.aidl \
+	telephony/java/com/android/internal/telephony/ITelephonyRegistryMSim.aidl \
 	telephony/java/com/android/internal/telephony/IIccPhoneBook.aidl \
+	telephony/java/com/android/internal/telephony/IIccPhoneBookMSim.aidl \
 	telephony/java/com/android/internal/telephony/ISms.aidl \
+	telephony/java/com/android/internal/telephony/ISmsMSim.aidl \
 	telephony/java/com/android/internal/telephony/IWapPushManager.aidl \
 	wifi/java/android/net/wifi/IWifiManager.aidl \
 	wifi/java/android/net/wifi/p2p/IWifiP2pManager.aidl \
@@ -252,6 +269,7 @@ aidl_files := \
 	frameworks/base/core/java/android/app/PendingIntent.aidl \
 	frameworks/base/core/java/android/bluetooth/BluetoothDevice.aidl \
 	frameworks/base/core/java/android/bluetooth/BluetoothHealthAppConfiguration.aidl \
+	frameworks/base/core/java/android/bluetooth/BluetoothGattAppConfiguration.aidl \
 	frameworks/base/core/java/android/content/ComponentName.aidl \
 	frameworks/base/core/java/android/content/Intent.aidl \
 	frameworks/base/core/java/android/content/IntentSender.aidl \

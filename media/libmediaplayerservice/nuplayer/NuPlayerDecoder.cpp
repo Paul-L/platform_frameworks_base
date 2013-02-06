@@ -127,11 +127,22 @@ sp<AMessage> NuPlayer::Decoder::makeFormat(const sp<MetaData> &meta) {
 
         msg->setInt32("channel-count", numChannels);
         msg->setInt32("sample-rate", sampleRate);
+
+        int32_t useSWDecforAudio;
+        if(meta->findInt32(kKeyUseSWDec, &useSWDecforAudio)) {
+            LOGV("Use Software Decoder for Audio");
+            msg->setInt32("use-swdec", useSWDecforAudio);
+        }
     }
 
     int32_t maxInputSize;
     if (meta->findInt32(kKeyMaxInputSize, &maxInputSize)) {
         msg->setInt32("max-input-size", maxInputSize);
+    }
+
+    int32_t value;
+    if (meta->findInt32(kKeySmoothStreaming, &value)) {
+        msg->setInt32("smooth-streaming", value);
     }
 
     mCSDIndex = 0;
@@ -233,7 +244,22 @@ sp<AMessage> NuPlayer::Decoder::makeFormat(const sp<MetaData> &meta) {
         buffer->meta()->setInt32("csd", true);
         mCSD.push(buffer);
     }
-
+    else if (meta->findData(kKeyAacCodecSpecificData, &type, &data, &size)) {
+      if (size > 0 && data != NULL) {
+        sp<ABuffer> buffer = new ABuffer(size);
+        if (buffer != NULL) {
+          memcpy(buffer->data(), data, size);
+          buffer->meta()->setInt32("csd", true);
+          mCSD.push(buffer);
+        }
+        else {
+          LOGE("kKeyAacCodecSpecificData ABuffer Allocation failed");
+        }
+      }
+      else {
+          LOGE("Not a valid data pointer or size == 0");
+      }
+    }
     return msg;
 }
 

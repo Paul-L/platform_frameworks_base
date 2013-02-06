@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +44,7 @@ import android.os.Message;
 import android.os.ServiceManager;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Slog;
@@ -83,10 +85,12 @@ import com.android.systemui.statusbar.NotificationData;
 import com.android.systemui.statusbar.StatusBar;
 import com.android.systemui.statusbar.StatusBarIconView;
 import com.android.systemui.statusbar.SignalClusterView;
+import com.android.systemui.statusbar.MSimSignalClusterView;
 import com.android.systemui.statusbar.policy.DateView;
 import com.android.systemui.statusbar.policy.BatteryController;
 import com.android.systemui.statusbar.policy.LocationController;
 import com.android.systemui.statusbar.policy.NetworkController;
+import com.android.systemui.statusbar.policy.MSimNetworkController;
 import com.android.systemui.statusbar.policy.NotificationRowLayout;
 
 public class PhoneStatusBar extends StatusBar {
@@ -136,7 +140,8 @@ public class PhoneStatusBar extends StatusBar {
     BatteryController mBatteryController;
     LocationController mLocationController;
     NetworkController mNetworkController;
-
+    MSimNetworkController mMSimNetworkController;
+    
     int mNaturalBarHeight = -1;
     int mIconSize = -1;
     int mIconHPadding = -1;
@@ -289,9 +294,14 @@ public class PhoneStatusBar extends StatusBar {
         mIntruderAlertView = View.inflate(context, R.layout.intruder_alert, null);
         mIntruderAlertView.setVisibility(View.GONE);
         mIntruderAlertView.setClickable(true);
-
-        PhoneStatusBarView sb = (PhoneStatusBarView)View.inflate(context,
-                R.layout.status_bar, null);
+        PhoneStatusBarView sb;
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            sb = (PhoneStatusBarView)View.inflate(context,
+                    R.layout.msim_status_bar, null);
+        } else {
+            sb = (PhoneStatusBarView)View.inflate(context,
+                    R.layout.status_bar, null);
+        }
         sb.mService = this;
         mStatusBarView = sb;
 
@@ -351,16 +361,29 @@ public class PhoneStatusBar extends StatusBar {
         mLocationController = new LocationController(mContext); // will post a notification
         mBatteryController = new BatteryController(mContext);
         mBatteryController.addIconView((ImageView)sb.findViewById(R.id.battery));
-        mNetworkController = new NetworkController(mContext);
-        final SignalClusterView signalCluster =
-                (SignalClusterView)sb.findViewById(R.id.signal_cluster);
-        mNetworkController.addSignalCluster(signalCluster);
-        signalCluster.setNetworkController(mNetworkController);
-//        final ImageView wimaxRSSI =
-//                (ImageView)sb.findViewById(R.id.wimax_signal);
-//        if (wimaxRSSI != null) {
-//            mNetworkController.addWimaxIconView(wimaxRSSI);
-//        }
+        SignalClusterView signalCluster;
+        MSimSignalClusterView mSimSignalCluster;
+
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            mMSimNetworkController = new MSimNetworkController(mContext);
+            mSimSignalCluster = (MSimSignalClusterView) sb.findViewById(R.id.msim_signal_cluster);
+            for (int i=0; i < TelephonyManager.getDefault().getPhoneCount(); i++) {
+                mMSimNetworkController.addSignalCluster(mSimSignalCluster, i);
+            }
+            mSimSignalCluster.setNetworkController(mMSimNetworkController);
+        } else {
+            mNetworkController = new NetworkController(mContext);
+            signalCluster = (SignalClusterView)sb.findViewById(R.id.signal_cluster);
+            mNetworkController.addSignalCluster(signalCluster);
+            signalCluster.setNetworkController(mNetworkController);
+//          final ImageView wimaxRSSI =
+//                  (ImageView)sb.findViewById(R.id.wimax_signal);
+//          if (wimaxRSSI != null) {
+//              mNetworkController.addWimaxIconView(wimaxRSSI);
+//          }
+
+        }
+
         // Recents Panel
         mRecentTasksLoader = new RecentTasksLoader(context);
         updateRecentsPanel();
@@ -369,6 +392,7 @@ public class PhoneStatusBar extends StatusBar {
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_CONFIGURATION_CHANGED);
         filter.addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
+        filter.addAction(Intent.ACTION_SCREEN_ON);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         context.registerReceiver(mBroadcastReceiver, filter);
 
@@ -1822,8 +1846,13 @@ public class PhoneStatusBar extends StatusBar {
                     });
             }
         }
-
-        mNetworkController.dump(fd, pw, args);
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            for(int i=0; i < TelephonyManager.getDefault().getPhoneCount(); i++) {
+                mMSimNetworkController.dump(fd, pw, args, i);
+            }
+        } else {
+            mNetworkController.dump(fd, pw, args);
+        }
     }
 
     void onBarViewAttached() {
@@ -2212,10 +2241,20 @@ public class PhoneStatusBar extends StatusBar {
                     }
                 }
                 animateCollapse(excludeRecents);
+                if(Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    // Explicitly hide the expanded dialog. Otherwise it
+                    // causes continuous buffer updates to SurfaceTexture
+                    // even when SCREEN is turned off (while In-Call).
+                    // This keeps the power consumption to a minimum
+                    // in such a scenario.
+                    mExpandedDialog.hide();
+                }
             }
             else if (Intent.ACTION_CONFIGURATION_CHANGED.equals(action)) {
                 repositionNavigationBar();
                 updateResources();
+            } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                mExpandedDialog.show();
             }
         }
     };

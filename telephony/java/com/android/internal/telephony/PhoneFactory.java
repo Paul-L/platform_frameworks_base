@@ -25,6 +25,7 @@ import android.os.SystemProperties;
 
 import com.android.internal.telephony.cdma.CDMAPhone;
 import com.android.internal.telephony.cdma.CDMALTEPhone;
+import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
 import com.android.internal.telephony.gsm.GSMPhone;
 import com.android.internal.telephony.sip.SipPhone;
 import com.android.internal.telephony.sip.SipPhoneFactory;
@@ -39,15 +40,17 @@ public class PhoneFactory {
 
     //***** Class Variables
 
-    static private Phone sProxyPhone = null;
-    static private CommandsInterface sCommandsInterface = null;
+    static protected Phone sProxyPhone = null;
+    static protected CommandsInterface sCommandsInterface = null;
 
-    static private boolean sMadeDefaults = false;
-    static private PhoneNotifier sPhoneNotifier;
-    static private Looper sLooper;
-    static private Context sContext;
+    static protected boolean sMadeDefaults = false;
+    static protected PhoneNotifier sPhoneNotifier;
+    static protected Looper sLooper;
+    static protected Context sContext;
+    static protected UiccManager mUiccManager;
 
-    static final int preferredCdmaSubscription = RILConstants.PREFERRED_CDMA_SUBSCRIPTION;
+    static final int preferredCdmaSubscription =
+                         CdmaSubscriptionSourceManager.PREFERRED_CDMA_SUBSCRIPTION;
 
     //***** Class Methods
 
@@ -114,11 +117,11 @@ public class PhoneFactory {
                 int lteOnCdma = BaseCommands.getLteOnCdmaModeStatic();
                 switch (lteOnCdma) {
                     case Phone.LTE_ON_CDMA_FALSE:
-                        cdmaSubscription = RILConstants.SUBSCRIPTION_FROM_NV;
+                        cdmaSubscription = CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_NV;
                         Log.i(LOG_TAG, "lteOnCdma is 0 use SUBSCRIPTION_FROM_NV");
                         break;
                     case Phone.LTE_ON_CDMA_TRUE:
-                        cdmaSubscription = RILConstants.SUBSCRIPTION_FROM_RUIM;
+                        cdmaSubscription = CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_RUIM;
                         Log.i(LOG_TAG, "lteOnCdma is 1 use SUBSCRIPTION_FROM_RUIM");
                         break;
                     case Phone.LTE_ON_CDMA_UNKNOWN:
@@ -134,6 +137,8 @@ public class PhoneFactory {
 
                 //reads the system properties and makes commandsinterface
                 sCommandsInterface = new RIL(context, networkMode, cdmaSubscription);
+
+                mUiccManager = UiccManager.getInstance(context, sCommandsInterface);
 
                 int phoneType = getPhoneType(networkMode);
                 if (phoneType == Phone.PHONE_TYPE_GSM) {
@@ -179,6 +184,7 @@ public class PhoneFactory {
         case RILConstants.NETWORK_MODE_GSM_ONLY:
         case RILConstants.NETWORK_MODE_WCDMA_ONLY:
         case RILConstants.NETWORK_MODE_GSM_UMTS:
+        case RILConstants.NETWORK_MODE_LTE_GSM_WCDMA:
             return Phone.PHONE_TYPE_GSM;
 
         // Use CDMA Phone for the global mode including CDMA

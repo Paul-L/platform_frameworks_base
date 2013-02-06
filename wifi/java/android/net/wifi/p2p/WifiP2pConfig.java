@@ -47,6 +47,20 @@ public class WifiP2pConfig implements Parcelable {
     public int groupOwnerIntent = -1;
 
     /**
+     * Flag Indicating Intiator
+     * @hide
+     */
+
+    public int mInitiator = 0;
+
+   /**
+    * Flag Indicating if Invited
+    * @hide
+    */
+
+    public int mInvite = 0;
+
+    /**
      * Indicates whether the configuration is saved
      * @hide
      */
@@ -111,6 +125,8 @@ public class WifiP2pConfig implements Parcelable {
         sbuf.append("\n wps: ").append(wps);
         sbuf.append("\n groupOwnerIntent: ").append(groupOwnerIntent);
         sbuf.append("\n persist: ").append(persist.toString());
+        sbuf.append("\n mInitiator: ").append(mInitiator);
+        sbuf.append("\n mInvite: ").append(mInvite);
         return sbuf.toString();
     }
 
@@ -126,6 +142,8 @@ public class WifiP2pConfig implements Parcelable {
             wps = new WpsInfo(source.wps);
             groupOwnerIntent = source.groupOwnerIntent;
             persist = source.persist;
+            mInitiator = source.mInitiator;
+            mInvite = source.mInvite;
         }
     }
 
@@ -135,6 +153,8 @@ public class WifiP2pConfig implements Parcelable {
         dest.writeParcelable(wps, flags);
         dest.writeInt(groupOwnerIntent);
         dest.writeString(persist.name());
+        dest.writeInt(mInitiator);
+        dest.writeInt(mInvite);
     }
 
     /** Implement the Parcelable interface */
@@ -146,6 +166,8 @@ public class WifiP2pConfig implements Parcelable {
                 config.wps = (WpsInfo) in.readParcelable(null);
                 config.groupOwnerIntent = in.readInt();
                 config.persist = Persist.valueOf(in.readString());
+                config.mInitiator = in.readInt();
+                config.mInvite = in.readInt();
                 return config;
             }
 

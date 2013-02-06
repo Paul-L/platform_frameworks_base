@@ -84,7 +84,6 @@ private:
     ColorConverter &operator=(const ColorConverter &);
 };
 
-#ifdef QCOM_HARDWARE
 //------------------------------------------
 enum ColorConvertFormat {
     RGB565 = 1,
@@ -127,7 +126,6 @@ typedef int (* ConvertFn)(ColorConvertParams src,
 
 int convert(ColorConvertParams src, ColorConvertParams dst,
             uint8_t *adjustedClip);
-#endif
 
 }  // namespace android
 

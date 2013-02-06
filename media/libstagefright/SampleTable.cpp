@@ -151,6 +151,14 @@ SampleTable::~SampleTable() {
 
     delete mSampleIterator;
     mSampleIterator = NULL;
+
+    while (!mSampleDescAtoms.empty()) {
+        List<SampleDescAtom *>::iterator it = mSampleDescAtoms.begin();
+        delete (*it)->ptr;
+        (*it) = NULL;
+         mSampleDescAtoms.erase(it);
+    }
+    mSampleDescAtoms.clear();
 }
 
 bool SampleTable::isValid() const {
@@ -241,8 +249,11 @@ status_t SampleTable::setSampleToChunkParams(
             return ERROR_IO;
         }
 
-        CHECK(U32_AT(buffer) >= 1);  // chunk index is 1 based in the spec.
-
+        //CHECK(U32_AT(buffer) >= 1);  // chunk index is 1 based in the spec.
+        if(U32_AT(buffer) <= 0) {
+            LOGE("Non Standard Chunk index\n");
+            return ERROR_MALFORMED;
+        }
         // We want the chunk index to be 0-based.
         mSampleToChunkEntries[i].startChunk = U32_AT(buffer) - 1;
         mSampleToChunkEntries[i].samplesPerChunk = U32_AT(&buffer[4]);
@@ -283,12 +294,20 @@ status_t SampleTable::setSampleSizeParams(
     if (type == kSampleSizeType32) {
         mSampleSizeFieldSize = 32;
 
-        if (mDefaultSampleSize != 0) {
-            return OK;
+        // this needs to be 64 or overflow may occur from the calculation
+        uint64_t expectedDataSize = (uint64_t)12 + (uint64_t)mNumSampleSizes * (uint64_t)4;
+
+        // mDefaultSampleSize = 0 means sample table follows the field
+        if (((uint64_t)data_size < expectedDataSize) && (mDefaultSampleSize == 0)){
+            return ERROR_MALFORMED;
         }
 
-        if (data_size < 12 + mNumSampleSizes * 4) {
+        if (((uint64_t)data_size < expectedDataSize) && ((mDefaultSampleSize & 0xFF000000) != 0) ) {
             return ERROR_MALFORMED;
+        }
+
+        if (mDefaultSampleSize != 0) {
+            return OK;
         }
     } else {
         if ((mDefaultSampleSize & 0xffffff00) != 0) {
@@ -444,6 +463,10 @@ status_t SampleTable::getMaxSampleSize(size_t *max_size) {
     Mutex::Autolock autoLock(mLock);
 
     *max_size = 0;
+    if(mDefaultSampleSize > 0){
+        *max_size = mDefaultSampleSize;
+        return OK;
+    }
 
     for (uint32_t i = 0; i < mNumSampleSizes; ++i) {
         size_t sample_size;
@@ -461,7 +484,7 @@ status_t SampleTable::getMaxSampleSize(size_t *max_size) {
     return OK;
 }
 
-uint32_t abs_difference(uint32_t time1, uint32_t time2) {
+uint64_t abs_difference(uint64_t time1, uint64_t time2) {
     return time1 > time2 ? time1 - time2 : time2 - time1;
 }
 
@@ -489,7 +512,7 @@ void SampleTable::buildSampleEntriesTable() {
     mSampleTimeEntries = new SampleTimeEntry[mNumSampleSizes];
 
     uint32_t sampleIndex = 0;
-    uint32_t sampleTime = 0;
+    uint64_t sampleTime = 0;
 
     for (uint32_t i = 0; i < mTimeToSampleCount; ++i) {
         uint32_t n = mTimeToSample[2 * i];
@@ -521,14 +544,14 @@ void SampleTable::buildSampleEntriesTable() {
 }
 
 status_t SampleTable::findSampleAtTime(
-        uint32_t req_time, uint32_t *sample_index, uint32_t flags) {
+        uint64_t req_time, uint32_t *sample_index, uint32_t flags) {
     buildSampleEntriesTable();
 
     uint32_t left = 0;
     uint32_t right = mNumSampleSizes;
     while (left < right) {
         uint32_t center = (left + right) / 2;
-        uint32_t centerTime = mSampleTimeEntries[center].mCompositionTime;
+        uint64_t centerTime = mSampleTimeEntries[center].mCompositionTime;
 
         if (req_time < centerTime) {
             right = center;
@@ -577,12 +600,12 @@ status_t SampleTable::findSampleAtTime(
 
             if (closestIndex > 0) {
                 // Check left neighbour and pick closest.
-                uint32_t absdiff1 =
+                uint64_t absdiff1 =
                     abs_difference(
                             mSampleTimeEntries[closestIndex].mCompositionTime,
                             req_time);
 
-                uint32_t absdiff2 =
+                uint64_t absdiff2 =
                     abs_difference(
                             mSampleTimeEntries[closestIndex - 1].mCompositionTime,
                             req_time);
@@ -652,20 +675,20 @@ status_t SampleTable::findSyncSampleNear(
             return err;
         }
 
-        uint32_t sample_time = mSampleIterator->getSampleTime();
+        uint64_t sample_time = mSampleIterator->getSampleTime();
 
         err = mSampleIterator->seekTo(x);
         if (err != OK) {
             return err;
         }
-        uint32_t x_time = mSampleIterator->getSampleTime();
+        uint64_t x_time = mSampleIterator->getSampleTime();
 
         err = mSampleIterator->seekTo(y);
         if (err != OK) {
             return err;
         }
 
-        uint32_t y_time = mSampleIterator->getSampleTime();
+        uint64_t y_time = mSampleIterator->getSampleTime();
 
         if (abs_difference(x_time, sample_time)
                 > abs_difference(y_time, sample_time)) {
@@ -765,8 +788,9 @@ status_t SampleTable::getMetaDataForSample(
         uint32_t sampleIndex,
         off64_t *offset,
         size_t *size,
-        uint32_t *compositionTime,
-        bool *isSyncSample) {
+        uint64_t *compositionTime,
+        bool *isSyncSample,
+        uint32_t *sampleDescIndex) {
     Mutex::Autolock autoLock(mLock);
 
     status_t err;
@@ -784,6 +808,10 @@ status_t SampleTable::getMetaDataForSample(
 
     if (compositionTime) {
         *compositionTime = mSampleIterator->getSampleTime();
+    }
+
+    if (sampleDescIndex) {
+       *sampleDescIndex = mSampleIterator->getDescIndex();
     }
 
     if (isSyncSample) {
@@ -819,5 +847,122 @@ uint32_t SampleTable::getNumSyncSamples()
 {
     return mNumSyncSamples;
 }
+
+status_t SampleTable::setSampleDescParams(uint32_t count, off64_t offset, size_t size)
+{
+    // avcC atom will start after 78 bytes in avC1 atom
+    const uint32_t avcC_offset = 78;
+
+    for(uint32_t i = 0; i < count; ++i) {
+        uint32_t hdr[2];
+        if (mDataSource->readAt(offset, hdr, 8) < 8) {
+            return ERROR_IO;
+        }
+        uint64_t avc1_chunk_size = ntohl(hdr[0]);
+        uint32_t avc1_chunk_type = ntohl(hdr[1]);
+        off64_t avc1_data_offset = offset + 8;
+
+        if(avc1_chunk_size == 0)
+            return ERROR_MALFORMED;
+
+        if (avc1_chunk_size == 1) {
+            if (mDataSource->readAt(offset + 8, &avc1_chunk_size, 8) < 8) {
+                return ERROR_IO;
+            }
+            avc1_chunk_size = ntoh64(avc1_chunk_size);
+            if (avc1_chunk_size == 0)
+                return ERROR_MALFORMED;
+            avc1_data_offset += 8;
+
+            if (avc1_chunk_size < 16) {
+                // The smallest valid chunk is 16 bytes long in this case.
+                return ERROR_MALFORMED;
+            }
+        } else if (avc1_chunk_size < 8) {
+            // The smallest valid chunk is 8 bytes long.
+            return ERROR_MALFORMED;
+        }
+
+        off64_t avc1_chunk_data_size = offset + avc1_chunk_size - avc1_data_offset;
+        LOGV("parsing chunk %c%c%c%c", ((char *)&avc1_chunk_type)[3],
+                                                   ((char *)&avc1_chunk_type)[2],
+                                                   ((char *)&avc1_chunk_type)[1],
+                                                   ((char *)&avc1_chunk_type)[0]);
+
+        if (avc1_chunk_type != FOURCC('a', 'v', 'c', '1')) {
+            LOGE("Multiple Non AVC Sample Entries are not supported");
+            return ERROR_MALFORMED;
+        }
+
+        uint8_t *buffer = new uint8_t[(ssize_t)avc1_chunk_data_size];
+        if (mDataSource->readAt(avc1_data_offset, buffer, (ssize_t)avc1_chunk_data_size) < (ssize_t)avc1_chunk_data_size) {
+              return ERROR_IO;
+        }
+        uint16_t data_ref_index = U16_AT(&buffer[6]);
+        uint16_t width = U16_AT(&buffer[6 + 18]);
+        uint16_t height = U16_AT(&buffer[6 + 20]);
+        LOGE("data_ref_index : %d width : %d height: %d", data_ref_index, width, height);
+
+        /* parse AVCC atom */
+        uint64_t avcc_chunk_size = U32_AT(&buffer[avcC_offset]);
+        uint32_t avcc_chunk_type = U32_AT(&buffer[avcC_offset+4]);;
+        if((avcc_chunk_size == 0)|| (avcc_chunk_size == 1)) {
+            LOGE("chunk size error while reading avCC atom");
+            return ERROR_MALFORMED;
+        }
+
+        LOGV("parsing chunk %c%c%c%c",
+               ((char *)&avcc_chunk_type)[3],
+               ((char *)&avcc_chunk_type)[2],
+               ((char *)&avcc_chunk_type)[1],
+               ((char *)&avcc_chunk_type)[0]);
+
+        if (avcc_chunk_type != FOURCC('a', 'v', 'c', 'C')) {
+            LOGE("'avcC' atom expected, but not found");
+            return ERROR_MALFORMED;
+        }
+
+        off64_t avcc_chunk_data_size = avc1_chunk_data_size - avcC_offset - 8;
+        SampleDescAtom *sda = new SampleDescAtom;
+        uint8_t *avccBuffer = new uint8_t[avcc_chunk_data_size];
+        memcpy(avccBuffer, buffer+avcC_offset+8,avcc_chunk_data_size);
+        sda->ptr = avccBuffer;
+        sda->size =  avcc_chunk_data_size;
+        mSampleDescAtoms.push_back(sda);
+
+        delete[] buffer;
+
+        offset += avc1_chunk_size;
+    }
+    return OK;
+}
+
+status_t SampleTable::getSampleDescAtIndex(uint32_t index, uint8_t **ptr, uint32_t *size)
+{
+    uint32_t i = 1;
+    for (List<SampleDescAtom *>::iterator it = mSampleDescAtoms.begin();
+         it != mSampleDescAtoms.end(); ++it, ++i) {
+
+         if(i == index) {
+             SampleDescAtom *sda = *it;
+             *ptr = sda->ptr;
+             *size = sda->size;
+         }
+    }
+    return OK;
+}
+
+status_t SampleTable::getMaxAvccAtomSize(uint32_t *size)
+{
+    *size = 0;
+    for (List<SampleDescAtom *>::iterator it = mSampleDescAtoms.begin();
+                it != mSampleDescAtoms.end(); ++it) {
+         SampleDescAtom *sda = *it;
+         if( *size < sda->size)
+             *size = sda->size;
+    }
+    return OK;
+}
+
 }  // namespace android
 

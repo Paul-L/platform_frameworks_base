@@ -26,39 +26,17 @@ namespace android {
 // Parameter keys to communicate between camera application and driver.
 const char CameraParameters::KEY_PREVIEW_SIZE[] = "preview-size";
 const char CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES[] = "preview-size-values";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::KEY_SUPPORTED_HFR_SIZES[] = "hfr-size-values";
-#endif
 const char CameraParameters::KEY_PREVIEW_FORMAT[] = "preview-format";
 const char CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS[] = "preview-format-values";
 const char CameraParameters::KEY_PREVIEW_FRAME_RATE[] = "preview-frame-rate";
 const char CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES[] = "preview-frame-rate-values";
 const char CameraParameters::KEY_PREVIEW_FPS_RANGE[] = "preview-fps-range";
 const char CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE[] = "preview-fps-range-values";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::KEY_PREVIEW_FRAME_RATE_MODE[] = "preview-frame-rate-mode";
 const char CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATE_MODES[] = "preview-frame-rate-modes";
 const char CameraParameters::KEY_PREVIEW_FRAME_RATE_AUTO_MODE[] = "frame-rate-auto";
 const char CameraParameters::KEY_PREVIEW_FRAME_RATE_FIXED_MODE[] = "frame-rate-fixed";
-//Values for Continuous AF
-const char CameraParameters::CAF_OFF[] = "caf-off";
-const char CameraParameters::CAF_ON[] = "caf-on";
-//Same, for CodeAurora-based blobs
-const char CameraParameters::CAPTURE_MODE_NORMAL[] = "normal";
-const char CameraParameters::CAPTURE_MODE_BURST[] = "burst";
-const char CameraParameters::CAPTURE_MODE_CONTI_BURST[] = "contiburst";
-const char CameraParameters::CAPTURE_MODE_HDR[] = "hdr";
-const char CameraParameters::CAPTURE_MODE_HJR[] = "hjr";
-const char CameraParameters::CAPTURE_MODE_PANORAMA[] = "panorama";    
-const char CameraParameters::CONTINUOUS_AF_OFF[] = "caf-off";
-const char CameraParameters::CONTINUOUS_AF_ON[] = "caf-on";
-const char CameraParameters::KEY_CONTINUOUS_AF[] = "continuous-af";
-const char CameraParameters::KEY_CAPTURE_MODE[] = "capture-mode";
-const char CameraParameters::KEY_PICTURE_COUNT[] = "picture-count";
-const char CameraParameters::KEY_MAX_BURST_PICTURE_COUNT[] = "max-burst-picture-count";
-const char CameraParameters::KEY_SUPPORTED_CONTINUOUS_AF[] = "continuous-af-mode";
-const char CameraParameters::KEY_SUPPORTED_CAPTURE_MODES[] = "capture-mode-values";
-#endif
 const char CameraParameters::KEY_PICTURE_SIZE[] = "picture-size";
 const char CameraParameters::KEY_SUPPORTED_PICTURE_SIZES[] = "picture-size-values";
 const char CameraParameters::KEY_PICTURE_FORMAT[] = "picture-format";
@@ -78,20 +56,16 @@ const char CameraParameters::KEY_WHITE_BALANCE[] = "whitebalance";
 const char CameraParameters::KEY_SUPPORTED_WHITE_BALANCE[] = "whitebalance-values";
 const char CameraParameters::KEY_EFFECT[] = "effect";
 const char CameraParameters::KEY_SUPPORTED_EFFECTS[] = "effect-values";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::KEY_TOUCH_AF_AEC[] = "touch-af-aec";
 const char CameraParameters::KEY_SUPPORTED_TOUCH_AF_AEC[] = "touch-af-aec-values";
 const char CameraParameters::KEY_TOUCH_INDEX_AEC[] = "touch-index-aec";
 const char CameraParameters::KEY_TOUCH_INDEX_AF[] = "touch-index-af";
-#endif
 const char CameraParameters::KEY_ANTIBANDING[] = "antibanding";
 const char CameraParameters::KEY_SUPPORTED_ANTIBANDING[] = "antibanding-values";
 const char CameraParameters::KEY_SCENE_MODE[] = "scene-mode";
 const char CameraParameters::KEY_SUPPORTED_SCENE_MODES[] = "scene-mode-values";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::KEY_SCENE_DETECT[] = "scene-detect";
 const char CameraParameters::KEY_SUPPORTED_SCENE_DETECT[] = "scene-detect-values";
-#endif
 const char CameraParameters::KEY_FLASH_MODE[] = "flash-mode";
 const char CameraParameters::KEY_SUPPORTED_FLASH_MODES[] = "flash-mode-values";
 const char CameraParameters::KEY_FOCUS_MODE[] = "focus-mode";
@@ -118,14 +92,11 @@ const char CameraParameters::KEY_ZOOM_SUPPORTED[] = "zoom-supported";
 const char CameraParameters::KEY_SMOOTH_ZOOM_SUPPORTED[] = "smooth-zoom-supported";
 const char CameraParameters::KEY_FOCUS_DISTANCES[] = "focus-distances";
 const char CameraParameters::KEY_VIDEO_FRAME_FORMAT[] = "video-frame-format";
-#ifdef QCOM_HARDWARE
+const char CameraParameters::KEY_ISO_MODE[] = "iso";
+const char CameraParameters::KEY_SUPPORTED_ISO_MODES[] = "iso-values";
 const char CameraParameters::KEY_LENSSHADE[] = "lensshade";
 const char CameraParameters::KEY_SUPPORTED_LENSSHADE_MODES[] = "lensshade-values";
-#ifdef SAMSUNG_CAMERA_QCOM
-const char CameraParameters::KEY_AUTO_EXPOSURE[] = "metering";
-#else
 const char CameraParameters::KEY_AUTO_EXPOSURE[] = "auto-exposure";
-#endif
 const char CameraParameters::KEY_SUPPORTED_AUTO_EXPOSURE[] = "auto-exposure-values";
 const char CameraParameters::KEY_DENOISE[] = "denoise";
 const char CameraParameters::KEY_SUPPORTED_DENOISE[] = "denoise-values";
@@ -141,18 +112,6 @@ const char CameraParameters::KEY_REDEYE_REDUCTION[] = "redeye-reduction";
 const char CameraParameters::KEY_SUPPORTED_REDEYE_REDUCTION[] = "redeye-reduction-values";
 const char CameraParameters::KEY_HIGH_DYNAMIC_RANGE_IMAGING[] = "hdr";
 const char CameraParameters::KEY_SUPPORTED_HDR_IMAGING_MODES[] = "hdr-values";
-#ifndef SAMSUNG_CAMERA_HARDWARE
-const char CameraParameters::KEY_ISO_MODE[] = "iso";
-const char CameraParameters::KEY_SUPPORTED_ISO_MODES[] = "iso-values";
-#endif
-#endif
-#ifdef SAMSUNG_CAMERA_HARDWARE
-const char CameraParameters::KEY_METERING[] = "metering";
-const char CameraParameters::KEY_WDR[] = "wdr";
-const char CameraParameters::KEY_ANTI_SHAKE_MODE[] = "anti-shake";
-const char CameraParameters::KEY_ISO_MODE[] = "iso";
-const char CameraParameters::KEY_SUPPORTED_ISO_MODES[] = "iso-values";
-#endif
 const char CameraParameters::KEY_VIDEO_SIZE[] = "video-size";
 const char CameraParameters::KEY_SUPPORTED_VIDEO_SIZES[] = "video-size-values";
 const char CameraParameters::KEY_PREFERRED_PREVIEW_SIZE_FOR_VIDEO[] = "preferred-preview-size-for-video";
@@ -160,15 +119,14 @@ const char CameraParameters::KEY_MAX_NUM_DETECTED_FACES_HW[] = "max-num-detected
 const char CameraParameters::KEY_MAX_NUM_DETECTED_FACES_SW[] = "max-num-detected-faces-sw";
 const char CameraParameters::KEY_RECORDING_HINT[] = "recording-hint";
 const char CameraParameters::KEY_VIDEO_SNAPSHOT_SUPPORTED[] = "video-snapshot-supported";
-const char CameraParameters::KEY_FULL_VIDEO_SNAP_SUPPORTED[] = "full-video-snap-supported";
+const char CameraParameters::KEY_POWER_MODE_SUPPORTED[] = "power-mode-supported";
 const char CameraParameters::KEY_VIDEO_STABILIZATION[] = "video-stabilization";
 const char CameraParameters::KEY_VIDEO_STABILIZATION_SUPPORTED[] = "video-stabilization-supported";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::KEY_ZSL[] = "zsl";
 const char CameraParameters::KEY_SUPPORTED_ZSL_MODES[] = "zsl-values";
 const char CameraParameters::KEY_CAMERA_MODE[] = "camera-mode";
-#endif
 const char CameraParameters::KEY_AE_BRACKET_HDR[] = "ae-bracket-hdr";
+const char CameraParameters::KEY_POWER_MODE[] = "power-mode";
 /*only effective when KEY_AE_BRACKET_HDR set to ae_bracketing*/
 //const char CameraParameters::KEY_AE_BRACKET_SETTING_KEY[] = "ae-bracket-setting";
 
@@ -196,7 +154,6 @@ const char CameraParameters::EFFECT_POSTERIZE[] = "posterize";
 const char CameraParameters::EFFECT_WHITEBOARD[] = "whiteboard";
 const char CameraParameters::EFFECT_BLACKBOARD[] = "blackboard";
 const char CameraParameters::EFFECT_AQUA[] = "aqua";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::EFFECT_EMBOSS[] = "emboss";
 const char CameraParameters::EFFECT_SKETCH[] = "sketch";
 const char CameraParameters::EFFECT_NEON[] = "neon";
@@ -204,7 +161,6 @@ const char CameraParameters::EFFECT_NEON[] = "neon";
 // Values for auto exposure settings.
 const char CameraParameters::TOUCH_AF_AEC_OFF[] = "touch-off";
 const char CameraParameters::TOUCH_AF_AEC_ON[] = "touch-on";
-#endif
 
 // Values for antibanding settings.
 const char CameraParameters::ANTIBANDING_AUTO[] = "auto";
@@ -236,37 +192,28 @@ const char CameraParameters::SCENE_MODE_FIREWORKS[] = "fireworks";
 const char CameraParameters::SCENE_MODE_SPORTS[] = "sports";
 const char CameraParameters::SCENE_MODE_PARTY[] = "party";
 const char CameraParameters::SCENE_MODE_CANDLELIGHT[] = "candlelight";
-#if defined(QCOM_HARDWARE) && !defined(SAMSUNG_CAMERA_QCOM)
 const char CameraParameters::SCENE_MODE_BACKLIGHT[] = "backlight";
 const char CameraParameters::SCENE_MODE_FLOWERS[] = "flowers";
-#endif
 const char CameraParameters::SCENE_MODE_BARCODE[] = "barcode";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::SCENE_MODE_AR[] = "AR";
-const char CameraParameters::SCENE_MODE_OFF[] = "off";
 
 // Values for auto scene detection settings.
 const char CameraParameters::SCENE_DETECT_OFF[] = "off";
 const char CameraParameters::SCENE_DETECT_ON[] = "on";
-#endif
- 
+
 // Formats for setPreviewFormat and setPictureFormat.
 const char CameraParameters::PIXEL_FORMAT_YUV422SP[] = "yuv422sp";
 const char CameraParameters::PIXEL_FORMAT_YUV420SP[] = "yuv420sp";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::PIXEL_FORMAT_YUV420SP_ADRENO[] = "yuv420sp-adreno";
-#endif
 const char CameraParameters::PIXEL_FORMAT_YUV422I[] = "yuv422i-yuyv";
 const char CameraParameters::PIXEL_FORMAT_YUV420P[]  = "yuv420p";
 const char CameraParameters::PIXEL_FORMAT_RGB565[] = "rgb565";
 const char CameraParameters::PIXEL_FORMAT_RGBA8888[] = "rgba8888";
 const char CameraParameters::PIXEL_FORMAT_JPEG[] = "jpeg";
 const char CameraParameters::PIXEL_FORMAT_BAYER_RGGB[] = "bayer-rggb";
-#ifdef QCOM_HARDWARE
 const char CameraParameters::PIXEL_FORMAT_RAW[] = "raw";
 const char CameraParameters::PIXEL_FORMAT_YV12[] = "yuv420p";
 const char CameraParameters::PIXEL_FORMAT_NV12[] = "nv12";
-#endif
 
 // Values for focus mode settings.
 const char CameraParameters::FOCUS_MODE_AUTO[] = "auto";
@@ -276,8 +223,6 @@ const char CameraParameters::FOCUS_MODE_FIXED[] = "fixed";
 const char CameraParameters::FOCUS_MODE_EDOF[] = "edof";
 const char CameraParameters::FOCUS_MODE_CONTINUOUS_VIDEO[] = "continuous-video";
 const char CameraParameters::FOCUS_MODE_CONTINUOUS_PICTURE[] = "continuous-picture";
-#ifdef QCOM_HARDWARE
-const char CameraParameters::FOCUS_MODE_CONTINUOUS_CAMERA[] = "continuous-camera";
 const char CameraParameters::FOCUS_MODE_NORMAL[] = "normal";
 
 
@@ -298,15 +243,9 @@ const char CameraParameters::LENSSHADE_ENABLE[] = "enable";
 const char CameraParameters::LENSSHADE_DISABLE[] = "disable";
 
 // Values for auto exposure settings.
-#ifdef SAMSUNG_CAMERA_QCOM
-const char CameraParameters::AUTO_EXPOSURE_FRAME_AVG[] = "matrix";
-const char CameraParameters::AUTO_EXPOSURE_CENTER_WEIGHTED[] = "center";
-const char CameraParameters::AUTO_EXPOSURE_SPOT_METERING[] = "spot";
-#else
 const char CameraParameters::AUTO_EXPOSURE_FRAME_AVG[] = "frame-average";
 const char CameraParameters::AUTO_EXPOSURE_CENTER_WEIGHTED[] = "center-weighted";
 const char CameraParameters::AUTO_EXPOSURE_SPOT_METERING[] = "spot-metering";
-#endif
 
 const char CameraParameters::KEY_GPS_LATITUDE_REF[] = "gps-latitude-ref";
 const char CameraParameters::KEY_GPS_LONGITUDE_REF[] = "gps-longitude-ref";
@@ -325,26 +264,11 @@ const char CameraParameters::SKIN_TONE_ENHANCEMENT_ENABLE[] = "enable";
 const char CameraParameters::SKIN_TONE_ENHANCEMENT_DISABLE[] = "disable";
 
 const char CameraParameters::KEY_SHARPNESS[] = "sharpness";
-#if defined(QCOM_HARDWARE) && !defined(SAMSUNG_CAMERA_QCOM)
-const char CameraParameters::KEY_MAX_SHARPNESS[] = "sharpness-max";
-const char CameraParameters::KEY_MIN_SHARPNESS[] = "sharpness-min";
-#else
 const char CameraParameters::KEY_MAX_SHARPNESS[] = "max-sharpness";
-#endif
 const char CameraParameters::KEY_CONTRAST[] = "contrast";
-#if defined(QCOM_HARDWARE) && !defined(SAMSUNG_CAMERA_QCOM)
-const char CameraParameters::KEY_MAX_CONTRAST[] = "contrast-max";
-const char CameraParameters::KEY_MIN_CONTRAST[] = "contrast-min";
-#else
 const char CameraParameters::KEY_MAX_CONTRAST[] = "max-contrast";
-#endif
 const char CameraParameters::KEY_SATURATION[] = "saturation";
-#if defined(QCOM_HARDWARE) && !defined(SAMSUNG_CAMERA_QCOM)
-const char CameraParameters::KEY_MAX_SATURATION[] = "saturation-max";
-const char CameraParameters::KEY_MIN_SATURATION[] = "saturation-min";
-#else
 const char CameraParameters::KEY_MAX_SATURATION[] = "max-saturation";
-#endif
 
 //Values for DENOISE
 const char CameraParameters::DENOISE_OFF[] = "denoise-off";
@@ -385,29 +309,8 @@ const char CameraParameters::AE_BRACKET_HDR_OFF[] = "Off";
 const char CameraParameters::AE_BRACKET_HDR[] = "HDR";
 const char CameraParameters::AE_BRACKET[] = "AE-Bracket";
 
-#ifdef SAMSUNG_CAMERA_QCOM
-const char CameraParameters::FOCUS_MODE_FACEDETECT[] = "facedetect";
-const char CameraParameters::FOCUS_MODE_TOUCHAF[] = "touchaf";
-const char CameraParameters::ISO_50[] = "ISO50";
-// const char CameraParameters::KEY_ANTI_SHAKE_MODE[] = "antishake";
-const char CameraParameters::KEY_AUTO_CONTRAST[] = "auto-contrast";
-const char CameraParameters::KEY_BEAUTY_MODE[] = "beauty";
-const char CameraParameters::KEY_BLUR_MODE[] = "blur";
-const char CameraParameters::KEY_VINTAGE_MODE[] = "vintagemode";
-const char CameraParameters::KEY_WDR_MODE[] = "wdr";
-const char CameraParameters::VINTAGE_MODE_BNW[] = "bnw";
-const char CameraParameters::VINTAGE_MODE_COOL[] = "cool";
-const char CameraParameters::VINTAGE_MODE_NORMAL[] = "normal";
-const char CameraParameters::VINTAGE_MODE_OFF[] = "off";
-const char CameraParameters::VINTAGE_MODE_WARM[] = "warm";
-const char CameraParameters::SCENE_MODE_BACKLIGHT[] = "back-light";
-const char CameraParameters::SCENE_MODE_DAWN[] = "dusk-dawn";
-const char CameraParameters::SCENE_MODE_DUSKDAWN[] = "dusk-dawn";
-const char CameraParameters::SCENE_MODE_FALL[] = "fall-color";
-const char CameraParameters::SCENE_MODE_FALL_COLOR[] = "fall-color";
-const char CameraParameters::SCENE_MODE_FLOWERS[] = "flowers";
-const char CameraParameters::SCENE_MODE_TEXT[] = "text";
-#endif
+const char CameraParameters::LOW_POWER[] = "Low_Power";
+const char CameraParameters::NORMAL_POWER[] = "Normal_Power";
 
 static const char* portrait = "portrait";
 static const char* landscape = "landscape";
@@ -427,7 +330,6 @@ void CameraParameters::setOrientation(int orientation)
          set("orientation", landscape);
     }
 }
-#endif
 
 
 CameraParameters::CameraParameters()
@@ -496,12 +398,12 @@ void CameraParameters::set(const char *key, const char *value)
 {
     // XXX i think i can do this with strspn()
     if (strchr(key, '=') || strchr(key, ';')) {
-        //XXX LOGD("Key \"%s\"contains invalid character (= or ;)", key);
+        //XXX LOGE("Key \"%s\"contains invalid character (= or ;)", key);
         return;
     }
 
     if (strchr(value, '=') || strchr(key, ';')) {
-        //XXX LOGD("Value \"%s\"contains invalid character (= or ;)", value);
+        //XXX LOGE("Value \"%s\"contains invalid character (= or ;)", value);
         return;
     }
 
@@ -559,7 +461,7 @@ static int parse_pair(const char *str, int *first, int *second, char delim,
     int w = (int)strtol(str, &end, 10);
     // If a delimeter does not immediately follow, give up.
     if (*end != delim) {
-        LOGD("Cannot find delimeter (%c) in str=%s", delim, str);
+        LOGE("Cannot find delimeter (%c) in str=%s", delim, str);
         return -1;
     }
 
@@ -582,12 +484,12 @@ static int parseNDimVector(const char *str, int *num, int N, char delim = ',')
 {
     char *start, *end;
     if(num == NULL) {
-        LOGD("Invalid output array (num == NULL)");
+        LOGE("Invalid output array (num == NULL)");
         return -1;
     }
     //check if string starts and ends with parantheses
     if(str[0] != '(' || str[strlen(str)-1] != ')') {
-        LOGD("Invalid format of string %s, valid format is (n1, n2, n3, n4 ...)", str);
+        LOGE("Invalid format of string %s, valid format is (n1, n2, n3, n4 ...)", str);
         return -1;
     }
     start = (char*) str;
@@ -595,14 +497,13 @@ static int parseNDimVector(const char *str, int *num, int N, char delim = ',')
     for(int i=0; i<N; i++) {
         *(num+i) = (int) strtol(start, &end, 10);
         if(*end != delim && i < N-1) {
-            LOGD("Cannot find delimeter '%c' in string \"%s\". end = %c", delim, str, *end);
+            LOGE("Cannot find delimeter '%c' in string \"%s\". end = %c", delim, str, *end);
             return -1;
         }
         start = end+1;
     }
     return 0;
 }
-
 static void parseSizesList(const char *sizesStr, Vector<Size> &sizes)
 {
     if (sizesStr == 0) {
@@ -616,7 +517,7 @@ static void parseSizesList(const char *sizesStr, Vector<Size> &sizes)
         int success = parse_pair(sizeStartPtr, &width, &height, 'x',
                                  &sizeStartPtr);
         if (success == -1 || (*sizeStartPtr != ',' && *sizeStartPtr != '\0')) {
-            LOGD("Picture sizes string \"%s\" contains invalid character.", sizesStr);
+            LOGE("Picture sizes string \"%s\" contains invalid character.", sizesStr);
             return;
         }
         sizes.push(Size(width, height));
@@ -658,7 +559,6 @@ void CameraParameters::getSupportedPreviewSizes(Vector<Size> &sizes) const
     parseSizesList(previewSizesStr, sizes);
 }
 
-#ifdef QCOM_HARDWARE
 void CameraParameters::getSupportedHfrSizes(Vector<Size> &sizes) const
 {
     const char *hfrSizesStr = get(KEY_SUPPORTED_HFR_SIZES);
@@ -671,12 +571,6 @@ void CameraParameters::setPreviewFpsRange(int minFPS, int maxFPS)
     snprintf(str, sizeof(str), "%d,%d",minFPS,maxFPS);
     set(KEY_PREVIEW_FPS_RANGE,str);
 }
-
-void CameraParameters::setPostviewSize(int width, int height)
-{
-    // dummy
-}
-#endif
 
 void CameraParameters::setVideoSize(int width, int height)
 {
@@ -717,7 +611,6 @@ void CameraParameters::getPreviewFpsRange(int *min_fps, int *max_fps) const
     parse_pair(p, min_fps, max_fps, ',');
 }
 
-#ifdef QCOM_HARDWARE
 void CameraParameters::setPreviewFrameRateMode(const char *mode)
 {
     set(KEY_PREVIEW_FRAME_RATE_MODE, mode);
@@ -727,7 +620,6 @@ const char *CameraParameters::getPreviewFrameRateMode() const
 {
     return get(KEY_PREVIEW_FRAME_RATE_MODE);
 }
-#endif
 
 void CameraParameters::setPreviewFormat(const char *format)
 {
@@ -782,7 +674,6 @@ void CameraParameters::dump() const
     }
 }
 
-#ifdef QCOM_HARDWARE
 void CameraParameters::setTouchIndexAec(int x, int y)
 {
     char str[32];
@@ -845,7 +736,6 @@ void CameraParameters::getTouchIndexAf(int *x, int *y) const
         *y = tempY;
     }
 }
-#endif
 
 status_t CameraParameters::dump(int fd, const Vector<String16>& args) const
 {

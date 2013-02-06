@@ -20,6 +20,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothA2dp;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothHeadset;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
@@ -106,6 +107,10 @@ class BluetoothBondState {
         loadBondState();
     }
 
+    public synchronized void deinitBondState() {
+        closeProfileProxy();
+    }
+
     private void loadBondState() {
         if (mService.getBluetoothStateInternal() !=
                 BluetoothAdapter.STATE_TURNING_ON) {
@@ -119,11 +124,28 @@ class BluetoothBondState {
         if (bonds == null) {
             return;
         }
+        String address = null;
         mState.clear();
         if (DBG) Log.d(TAG, "found " + bonds.length + " bonded devices");
         for (String device : bonds) {
-            mState.put(mService.getAddressFromObjectPath(device).toUpperCase(),
-                    BluetoothDevice.BOND_BONDED);
+            address = mService.getAddressFromObjectPath(device);
+            if (address == null) {
+                Log.e(TAG, "error! address is null");
+                continue;
+            }
+            String pairState = mService.getUpdatedRemoteDeviceProperty(address, "Paired");
+            Log.d(TAG, "The paired state of the remote device is " + pairState);
+            if(pairState.equals("true")) {
+                Log.d(TAG, "The paired state of the remote device is true");
+                mState.put(address.toUpperCase(), BluetoothDevice.BOND_BONDED);
+            } else {
+                BluetoothClass btClass = new BluetoothClass(mService.getRemoteClass(address));
+                int btDeviceClass = btClass.getDeviceClass();
+                if (btDeviceClass == BluetoothClass.Device.PERIPHERAL_POINTING) {
+                    Log.d(TAG, "Its a HID pointing device, updating bond state as bonded");
+                    mState.put(address.toUpperCase(), BluetoothDevice.BOND_BONDED);
+                }
+            }
         }
     }
 
@@ -161,6 +183,7 @@ class BluetoothBondState {
             }
         } else if (state == BluetoothDevice.BOND_NONE) {
             mPairingRequestRcvd.remove(address);
+            mService.removeProfileState(address);
         }
 
         setProfilePriorities(address, state);
@@ -334,9 +357,17 @@ class BluetoothBondState {
 
         public void onServiceDisconnected(int profile) {
             if (profile == BluetoothProfile.A2DP) {
-                mA2dpProxy = null;
+                if (mA2dpProxy != null) {
+                    BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+                    bluetoothAdapter.closeProfileProxy(BluetoothProfile.A2DP, mA2dpProxy);
+                    mA2dpProxy = null;
+                }
             } else if (profile == BluetoothProfile.HEADSET) {
-                mHeadsetProxy = null;
+                if (mHeadsetProxy != null) {
+                    BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+                    bluetoothAdapter.closeProfileProxy(BluetoothProfile.HEADSET, mHeadsetProxy);
+                    mHeadsetProxy = null;
+                }
             }
         }
     };

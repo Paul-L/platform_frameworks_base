@@ -31,6 +31,7 @@ public interface IccConstants {
     static final int EF_MWIS = 0x6FCA;
     static final int EF_MBDN = 0x6fc7;
     static final int EF_PNN = 0x6fc5;
+    static final int EF_OPL = 0x6fc6;
     static final int EF_SPN = 0x6F46;
     static final int EF_SMS = 0x6F3C;
     static final int EF_ICCID = 0x2fe2;
@@ -75,6 +76,13 @@ public interface IccConstants {
     static final int EF_IST = 0x6f07;
     static final int EF_PCSCF = 0x6f09;
 
+    // Image Instance Data Files (for EF_IMG) from TS 31.102
+    static final int EF_IIDF1 = 0x4f01;
+    static final int EF_IIDF2 = 0x4f02;
+    static final int EF_IIDF3 = 0x4f03;
+    static final int EF_IIDF4 = 0x4f04;
+    static final int EF_IIDF5 = 0x4f05;
+
     // SMS record length from TS 51.011 10.5.3
     static public final int SMS_RECORD_LENGTH = 176;
 
@@ -85,6 +93,6 @@ public interface IccConstants {
     static final String DF_GSM = "7F20";
     static final String DF_CDMA = "7F25";
 
-    //ISIM access
-    static final String DF_ADFISIM = "7FFF";
+    //UICC access
+    static final String DF_ADF = "7FFF";
 }

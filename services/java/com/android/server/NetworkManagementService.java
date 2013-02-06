@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (c) 2011,2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +46,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.util.Slog;
 import android.util.SparseBooleanArray;
+import java.util.List;
 
 import com.android.internal.net.NetworkStatsFactory;
 import com.google.android.collect.Sets;
@@ -75,7 +77,7 @@ import java.util.concurrent.CountDownLatch;
 public class NetworkManagementService extends INetworkManagementService.Stub
         implements Watchdog.Monitor {
     private static final String TAG = "NetworkManagementService";
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
     private static final String NETD_TAG = "NetdConnector";
 
     private static final int ADD = 1;
@@ -97,6 +99,7 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         public static final int TetherDnsFwdTgtListResult = 112;
         public static final int TtyListResult             = 113;
 
+        public static final int CommandOkay               = 200;
         public static final int TetherStatusResult        = 210;
         public static final int IpFwdStatusResult         = 211;
         public static final int InterfaceGetCfgResult     = 213;
@@ -107,6 +110,7 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         public static final int InterfaceTxThrottleResult = 219;
         public static final int QuotaCounterResult        = 220;
         public static final int TetheringStatsResult      = 221;
+        public static final int V6RtrAdvResult            = 223;
 
         public static final int InterfaceChange           = 600;
         public static final int BandwidthControl          = 601;
@@ -360,6 +364,31 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         } catch (NativeDaemonConnectorException e) {
             throw new IllegalStateException(
                     "Cannot communicate with native daemon to list interfaces");
+        }
+    }
+
+    public void addUpstreamV6Interface(String iface) throws IllegalStateException {
+        mContext.enforceCallingOrSelfPermission(
+                android.Manifest.permission.ACCESS_NETWORK_STATE, "NetworkManagementService");
+
+        Slog.d(TAG, "addUpstreamInterface("+ iface + ")");
+        try {
+            mConnector.doCommand("tether interface add_upstream " + iface);
+        } catch (NativeDaemonConnectorException e) {
+            throw new IllegalStateException("Cannot add upstream interface");
+        }
+    }
+
+    public void removeUpstreamV6Interface(String iface) throws IllegalStateException {
+        mContext.enforceCallingOrSelfPermission(
+                android.Manifest.permission.ACCESS_NETWORK_STATE, "NetworkManagementService");
+
+        Slog.d(TAG, "removeUpstreamInterface(" + iface + ")");
+
+        try {
+            mConnector.doCommand("tether interface remove_upstream " + iface);
+        } catch (NativeDaemonConnectorException e) {
+            throw new IllegalStateException("Cannot remove upstream interface");
         }
     }
 
@@ -693,6 +722,165 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         Slog.d(TAG, "Shutting down");
     }
 
+    public boolean replaceV4SrcRoute(String iface, String ipAddr, String gatewayAddr, int routeId) {
+        try {
+            String cmd;
+            if ((gatewayAddr == null) ||
+                            (gatewayAddr.startsWith("0")) || (gatewayAddr.length() == 0 )) {
+                cmd = String.format("route replace src v4 %s %s %d", iface, ipAddr, routeId);
+            } else {
+                cmd = String.format("route replace src v4 %s %s %d %s",
+                                iface, ipAddr, routeId, gatewayAddr);
+            }
+            String rsp = mConnector.doCommand(cmd).get(0);
+
+            String []tok = rsp.split(" ");
+            int code;
+            try {
+                code = Integer.parseInt(tok[0]);
+            } catch (NumberFormatException nfe) {
+                Slog.e(TAG, String.format("Error parsing code %s", tok[0]));
+                return false;
+            }
+            if (code == NetdResponseCode.CommandOkay) {
+                Slog.d(TAG, rsp);
+                return true;
+            } else {
+                Slog.e(TAG, rsp);
+                return false;
+            }
+        } catch (NullPointerException npe) {
+            Slog.e(TAG, "Null pointer exception while trying to add src route");
+        } catch (NativeDaemonConnectorException nde) {
+            Slog.e(TAG, String.format("Failed to set route %s: for iface [%s] ip [%s] rid [%d]",
+                                  nde, iface, ipAddr, routeId));
+        }
+        return false;
+    }
+
+    public boolean replaceV6SrcRoute(String iface, String ipAddr, String gatewayAddr, int routeId) {
+        try {
+            String cmd;
+            if ((gatewayAddr == null) || (gatewayAddr.startsWith("0"))
+                           || (gatewayAddr.startsWith(":")) || (gatewayAddr.length() == 0)) {
+                cmd = String.format("route replace src v6 %s %s %d", iface, ipAddr, routeId);
+            } else {
+                cmd = String.format("route replace src v6 %s %s %d %s",
+                                iface, ipAddr, routeId, gatewayAddr);
+            }
+            String rsp = mConnector.doCommand(cmd).get(0);
+
+            String []tok = rsp.split(" ");
+            int code;
+            try {
+                code = Integer.parseInt(tok[0]);
+            } catch (NumberFormatException nfe) {
+                Slog.e(TAG, String.format("Error parsing code %s", tok[0]));
+                return false;
+            }
+            if (code == NetdResponseCode.CommandOkay) {
+                Slog.d(TAG, rsp);
+                return true;
+            } else {
+                Slog.e(TAG, rsp);
+                return false;
+            }
+        } catch (NullPointerException npe) {
+            Slog.e(TAG, "Null pointer exception while trying to add src route");
+        } catch (NativeDaemonConnectorException nde) {
+            Slog.e(TAG, String.format("Failed to set route %s: for iface [%s] ip [%s] rid [%d]",
+                                  nde, iface, ipAddr, routeId));
+        }
+        return false;
+    }
+
+    public boolean delV4SrcRoute(int routeId) {
+        try {
+            String cmd = String.format("route del src v4 %d", routeId);
+            String rsp = mConnector.doCommand(cmd).get(0);
+
+            String []tok = rsp.split(" ");
+            int code;
+            try {
+                code = Integer.parseInt(tok[0]);
+            } catch (NumberFormatException nfe) {
+                Slog.e(TAG, String.format("Error parsing code %s", tok[0]));
+                return false;
+            }
+            if (code == NetdResponseCode.CommandOkay) {
+                Slog.d(TAG, rsp);
+                return true;
+            } else {
+                Slog.e(TAG, rsp);
+                return false;
+            }
+        } catch (NativeDaemonConnectorException nde) {
+            Slog.e(TAG, String.format("Failed to del src route %s: for rid [%d]", nde, routeId));
+        }
+        return false;
+    }
+
+    public boolean delV6SrcRoute(int routeId) {
+        try {
+            String cmd = String.format("route del src v6 %d", routeId);
+            String rsp = mConnector.doCommand(cmd).get(0);
+
+            String []tok = rsp.split(" ");
+            int code;
+            try {
+                code = Integer.parseInt(tok[0]);
+            } catch (NumberFormatException nfe) {
+                Slog.e(TAG, String.format("Error parsing code %s", tok[0]));
+                return false;
+            }
+            if (code == NetdResponseCode.CommandOkay) {
+                Slog.d(TAG, rsp);
+                return true;
+            } else {
+                Slog.e(TAG, rsp);
+                return false;
+            }
+        } catch (NativeDaemonConnectorException nde) {
+            Slog.e(TAG, String.format("Failed to del src route %s: for rid [%d]", nde, routeId));
+        }
+        return false;
+    }
+
+    public boolean replaceV4DefaultRoute(String iface, String gatewayAddr) {
+        try {
+            String cmd;
+            if ((gatewayAddr == null) || (gatewayAddr.startsWith("0")) ||
+                (gatewayAddr.length() == 0)) {
+                cmd = String.format("route replace def v4 %s", iface);
+            } else {
+                cmd = String.format("route replace def v4 %s %s", iface, gatewayAddr);
+            }
+            String rsp = mConnector.doCommand(cmd).get(0);
+
+            String []tok = rsp.split(" ");
+            int code;
+            try {
+                code = Integer.parseInt(tok[0]);
+            } catch (NumberFormatException nfe) {
+                Slog.e(TAG, String.format("Error parsing code %s", tok[0]));
+                return false;
+            }
+            if (code == NetdResponseCode.CommandOkay) {
+                Slog.d(TAG, rsp);
+                return true;
+            } else {
+                Slog.e(TAG, rsp);
+                return false;
+            }
+        } catch (NullPointerException npe) {
+            Slog.e(TAG, "Null pointer exception while trying to replace def route");
+        } catch (NativeDaemonConnectorException nde) {
+            Slog.e(TAG, String.format("Failed to replace default route %s: for iface [%s]",
+                                  nde, iface));
+        }
+        return false;
+    }
+
     public boolean getIpForwardingEnabled() throws IllegalStateException{
         mContext.enforceCallingOrSelfPermission(
                 android.Manifest.permission.ACCESS_NETWORK_STATE, "NetworkManagementService");
@@ -880,7 +1068,7 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         try {
             modifyNat("enable", internalInterface, externalInterface);
         } catch (Exception e) {
-            Log.e(TAG, "enableNat got Exception " + e.toString());
+            Log.e(TAG, "enableNat got Exception ", e);
             throw new IllegalStateException(
                     "Unable to communicate to native daemon for enabling NAT interface");
         }
@@ -894,10 +1082,41 @@ public class NetworkManagementService extends INetworkManagementService.Stub
         try {
             modifyNat("disable", internalInterface, externalInterface);
         } catch (Exception e) {
-            Log.e(TAG, "disableNat got Exception " + e.toString());
+            Log.e(TAG, "disableNat got Exception: ", e);
             throw new IllegalStateException(
                     "Unable to communicate to native daemon for disabling NAT interface");
         }
+    }
+
+    public void enableNatBySubnet(String internalInterface, String externalInterface,
+            LinkAddress[] subnets) {
+        String cmd = String.format("nat enable %s %s %s", internalInterface,
+                externalInterface, getSubnetsString(subnets));
+        if (DBG)
+            Log.d(TAG, "enableNatBySubnet: " + cmd);
+        mConnector.doCommand(cmd);
+    }
+
+    public void disableNatBySubnet(String internalInterface, String externalInterface,
+            LinkAddress[] subnets) {
+        String cmd = String.format("nat disable %s %s %s", internalInterface,
+                externalInterface, getSubnetsString(subnets));
+        if (DBG)
+            Log.d(TAG, "disableNatBySubnet: " + cmd);
+        mConnector.doCommand(cmd);
+    }
+
+    private String getSubnetsString(LinkAddress[] subnets) {
+        if (subnets == null) {
+            return "0";
+        }
+
+        String cmd = "";
+        cmd += subnets.length;
+        for (int i = 0; i < subnets.length; i++) {
+            cmd += " " + subnets[i].toString();
+        }
+        return cmd;
     }
 
     public String[] listTtys() throws IllegalStateException {
@@ -1466,6 +1685,25 @@ public class NetworkManagementService extends INetworkManagementService.Stub
             throw new IllegalStateException(
                     "Error communicating with native daemon to flush interface " + iface, e);
         }
+    }
+
+    public String getIpv6Gateway(String interfaceName) {
+        String cmd = "rtsol " + interfaceName;
+        if (DBG) Log.d(TAG, "getIpv6Gateway(" + interfaceName + ")");
+
+        ArrayList<String> rsp = null;
+
+        try {
+            rsp = mConnector.doCommand(cmd.toString());
+        } catch (NativeDaemonConnectorException e) {
+            throw new IllegalStateException(
+                    "Unable to communicate with native dameon to request RS - " + e);
+        }
+
+        if (DBG) Log.v(TAG, "getIpv6Gateway() cmd:" + cmd + " response is " + rsp.toString());
+
+        // return the first gateway
+        return rsp != null ? rsp.get(0) : null;
     }
 
     /** {@inheritDoc} */

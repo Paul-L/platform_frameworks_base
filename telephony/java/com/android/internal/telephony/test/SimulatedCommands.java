@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +29,7 @@ import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.DataCallState;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.UUSInfo;
+import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
 import com.android.internal.telephony.gsm.CallFailCause;
 import com.android.internal.telephony.gsm.SmsBroadcastConfigInfo;
 import com.android.internal.telephony.gsm.SuppServiceNotification;
@@ -120,9 +122,9 @@ public final class SimulatedCommands extends BaseCommands
 
         if (pin != null && pin.equals(mPinCode)) {
             Log.i(LOG_TAG, "[SimCmd] supplyIccPin: success!");
-            setRadioState(RadioState.SIM_READY);
             mPinUnlockAttempts = 0;
             mSimLockedState = SimLockState.NONE;
+            mIccStatusChangedRegistrants.notifyRegistrants();
 
             if (result != null) {
                 AsyncResult.forMessage(result, null, null);
@@ -162,9 +164,9 @@ public final class SimulatedCommands extends BaseCommands
 
         if (puk != null && puk.equals(SIM_PUK_CODE)) {
             Log.i(LOG_TAG, "[SimCmd] supplyIccPuk: success!");
-            setRadioState(RadioState.SIM_READY);
             mSimLockedState = SimLockState.NONE;
             mPukUnlockAttempts = 0;
+            mIccStatusChangedRegistrants.notifyRegistrants();
 
             if (result != null) {
                 AsyncResult.forMessage(result, null, null);
@@ -428,7 +430,7 @@ public final class SimulatedCommands extends BaseCommands
         unimplemented(result);
     }
 
-    public void supplyNetworkDepersonalization(String netpin, Message result)  {
+    public void supplyDepersonalization(String netpin, int type, Message result)  {
         unimplemented(result);
     }
 
@@ -441,11 +443,11 @@ public final class SimulatedCommands extends BaseCommands
      *      The ar.result List is sorted by DriverCall.index
      */
     public void getCurrentCalls (Message result) {
-        if (mState == RadioState.SIM_READY) {
+        if ((mState == RadioState.RADIO_ON) && !isSimLocked()) {
             //Log.i("GSM", "[SimCmds] getCurrentCalls");
             resultSuccess(result, simulatedCallState.getDriverCalls());
         } else {
-            //Log.i("GSM", "[SimCmds] getCurrentCalls: SIM not ready!");
+            //Log.i("GSM", "[SimCmds] getCurrentCalls: RADIO_OFF or SIM not ready!");
             resultFail(result,
                 new CommandException(
                     CommandException.Error.RADIO_NOT_AVAILABLE));
@@ -504,6 +506,9 @@ public final class SimulatedCommands extends BaseCommands
         resultSuccess(result, null);
     }
 
+    public void getIMSI(Message result) {
+        getIMSIForApp(null, result);
+    }
     /**
      *  returned message
      *  retMsg.obj = AsyncResult ar
@@ -511,7 +516,7 @@ public final class SimulatedCommands extends BaseCommands
      *  ar.userObject contains the original value of result.obj
      *  ar.result is String containing IMSI on success
      */
-    public void getIMSI(Message result) {
+    public void getIMSIForApp(String aid, Message result) {
         resultSuccess(result, "012345678901234");
     }
 
@@ -964,6 +969,30 @@ public final class SimulatedCommands extends BaseCommands
         unimplemented(result);
     }
 
+    public void setupQosReq (int callId, ArrayList<String> qosFlows, Message result) {
+        unimplemented(result);
+    }
+
+    public void releaseQos (int qosId, Message result) {
+        unimplemented(result);
+    }
+
+    public void modifyQos (int qosId, ArrayList<String> qosFlows, Message result) {
+        unimplemented(result);
+    }
+
+    public void suspendQos (int qosId, Message result) {
+        unimplemented(result);
+    }
+
+    public void resumeQos (int qosId, Message result) {
+        unimplemented(result);
+    }
+
+    public void getQosStatus (int qosId, Message result) {
+        unimplemented(result);
+    }
+
     public void deactivateDataCall(int cid, int reason, Message result) {unimplemented(result);}
 
     public void setPreferredNetworkType(int networkType , Message result) {
@@ -1022,14 +1051,7 @@ public final class SimulatedCommands extends BaseCommands
 
     public void setRadioPower(boolean on, Message result) {
         if(on) {
-            if (isSimLocked()) {
-                Log.i("SIM", "[SimCmd] setRadioPower: SIM locked! state=" +
-                        mSimLockedState);
-                setRadioState(RadioState.SIM_LOCKED_OR_ABSENT);
-            }
-            else {
-                setRadioState(RadioState.SIM_READY);
-            }
+            setRadioState(RadioState.RADIO_ON);
         } else {
             setRadioState(RadioState.RADIO_OFF);
         }
@@ -1044,6 +1066,11 @@ public final class SimulatedCommands extends BaseCommands
         unimplemented(result);
     }
 
+    public void iccIO(int command, int fileid, String path, int p1, int p2, int p3, String data,
+            String pin2, Message response) {
+        iccIOForApp(command, fileid, path, p1, p2, p3, data,pin2, null, response);
+    }
+ 
     public void acknowledgeIncomingGsmSmsWithPdu(boolean success, String ackPdu,
             Message result) {
         unimplemented(result);
@@ -1054,8 +1081,8 @@ public final class SimulatedCommands extends BaseCommands
      * response.obj will be an AsyncResult
      * response.obj.userObj will be a SimIoResult on success
      */
-    public void iccIO (int command, int fileid, String path, int p1, int p2,
-                       int p3, String data, String pin2, Message result) {
+    public void iccIOForApp (int command, int fileid, String path, int p1, int p2,
+                       int p3, String data, String pin2, String aid, Message result) {
         unimplemented(result);
     }
 
@@ -1165,6 +1192,20 @@ public final class SimulatedCommands extends BaseCommands
 
     public void getBasebandVersion (Message result) {
         resultSuccess(result, "SimulatedCommands");
+    }
+
+    /**
+     * Simulates an Stk Call Control Alpha message
+     * @param alphaString Alpha string to send.
+     */
+    public void triggerIncomingStkCcAlpha(String alphaString) {
+        if (mCatCcAlphaRegistrant != null) {
+            mCatCcAlphaRegistrant.notifyResult(alphaString);
+        }
+    }
+
+    public void sendStkCcAplha(String alphaString) {
+        triggerIncomingStkCcAlpha(alphaString);
     }
 
     /**
@@ -1515,6 +1556,49 @@ public final class SimulatedCommands extends BaseCommands
     }
 
     public void requestIsimAuthentication(String nonce, Message response) {
+        unimplemented(response);
+    }
+
+    public void getVoiceRadioTechnology(Message response) {
+        unimplemented(response);
+    }
+
+    public void getImsRegistrationState(Message response) {
+        unimplemented(response);
+    }
+
+    public void sendImsCdmaSms(byte[] pdu, int retry, int messageRef,
+            Message response){
+        unimplemented(response);
+    }
+
+    public void sendImsGsmSms(String smscPDU, String pdu,
+            int retry, int messageRef, Message response){
+        unimplemented(response);
+    }
+
+    public void setCdmaBroadcastConfig(CdmaSmsBroadcastConfigInfo[] configs, Message response) {
+        unimplemented(response);
+    }
+
+    public void getDataCallProfile(int appType, Message response){
+        unimplemented(response);
+    }
+
+    public void setTransmitPower(int powerLevel, Message result) {
+        unimplemented(result);
+    }
+
+    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
+            Message response) {
+        unimplemented(response);
+    }
+
+    public void setDataSubscription (Message response) {
+        unimplemented(response);
+    }
+
+    public void setSubscriptionMode(int subscriptionMode, Message response) {
         unimplemented(response);
     }
 }

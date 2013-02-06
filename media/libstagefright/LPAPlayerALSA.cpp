@@ -31,7 +31,7 @@
 #include <media/AudioTrack.h>
 
 extern "C" {
-   #include <sound/asound.h>
+   #include <asound.h>
    #include "alsa_audio.h"
 }
 
@@ -1317,7 +1317,9 @@ void LPAPlayer::A2DPNotificationThreadEntry() {
                 CHECK(success);
                 LOGV("Before Audio Sink Open");
                 status_t ret = mAudioSink->open(mSampleRate, numChannels,AUDIO_FORMAT_PCM_16_BIT, DEFAULT_AUDIOSINK_BUFFERCOUNT);
-                mAudioSink->start();
+                if (!isPaused) {
+                    mAudioSink->start();
+                }
                 LOGV("After Audio Sink Open");
                 mAudioSinkOpen = true;
             }

@@ -45,6 +45,10 @@ struct ATSParser : public RefBase {
             DISCONTINUITY_AUDIO_FORMAT
                 | DISCONTINUITY_VIDEO_FORMAT
                 | DISCONTINUITY_TIME,
+
+        //Seek for HLS & TS is handle from player
+        DISCONTINUITY_TS_PLAYER_SEEK = 8,
+        DISCONTINUITY_HLS_PLAYER_SEEK = 16,
     };
 
     enum Flags {
@@ -84,6 +88,12 @@ struct ATSParser : public RefBase {
         STREAMTYPE_MPEG4_VIDEO          = 0x10,
         STREAMTYPE_H264                 = 0x1b,
     };
+
+    status_t parseTSToGetPTS(const void *data, size_t size,
+                             unsigned streamPID, uint64_t& PTS);
+
+    status_t parseTSToGetPID(const void *data, size_t size,
+                             unsigned& streamPID);
 
 protected:
     virtual ~ATSParser();

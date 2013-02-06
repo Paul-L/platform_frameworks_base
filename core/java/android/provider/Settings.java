@@ -1125,6 +1125,26 @@ public final class Settings {
          */
         public static final String STAY_ON_WHILE_PLUGGED_IN = "stay_on_while_plugged_in";
 
+
+        /**
+         * @hide
+         * Whether Dual microhpone is enabled.
+         */
+        public static final String DUALMIC = "dualmic";
+
+        /**
+         * @hide
+         * Whether ANC is enabled.
+         */
+        public static final String ANC = "anc";
+
+        /**
+          * Default file manager to show files on extrenal storage media
+          * when it is mounted
+          * @hide
+          */
+        public static final String DEFAULT_FILE_MANAGER = "default_file_manager";
+
         /**
          * What happens when the user presses the end call button if they're not
          * on a call.<br/>
@@ -1454,6 +1474,10 @@ public final class Settings {
          */
         public static final String VOLUME_MUSIC = "volume_music";
 
+        public static final String VOLUME_FM = "volume_fm";
+
+        public static final String DUMMY_STRING_FOR_PADDING = "";
+
         /**
          * Alarm volume. This is used internally, changing this
          * value will not change the volume. See AudioManager.
@@ -1504,7 +1528,9 @@ public final class Settings {
          */
         public static final String[] VOLUME_SETTINGS = {
             VOLUME_VOICE, VOLUME_SYSTEM, VOLUME_RING, VOLUME_MUSIC,
-            VOLUME_ALARM, VOLUME_NOTIFICATION, VOLUME_BLUETOOTH_SCO
+            VOLUME_ALARM, VOLUME_NOTIFICATION, VOLUME_BLUETOOTH_SCO,
+            DUMMY_STRING_FOR_PADDING,DUMMY_STRING_FOR_PADDING,
+            DUMMY_STRING_FOR_PADDING,VOLUME_FM
         };
 
         /**
@@ -1681,6 +1707,52 @@ public final class Settings {
          * boolean (1 or 0).
          */
         public static final String DTMF_TONE_WHEN_DIALING = "dtmf_tone";
+
+         /**
+          * Auto Answer timeout value. The supported timeout values are 5 sec,
+          * 10 sec, 15 sec and -1 (for disabling).
+          * @hide
+          */
+        public static final String AUTO_ANSWER_TIMEOUT = "auto_answer";
+
+        /**
+          * Subscription to be used for voice call on a multi sim device. The supported values
+          * are 0 = SUB1, 1 = SUB2.
+          */
+        public static final String MULTI_SIM_VOICE_CALL_SUBSCRIPTION = "multi_sim_voice_call";
+
+        /**
+          * Used to provide option to user to select subscription during dial.
+          * The value is 0 or 1.
+          */
+        public static final String MULTI_SIM_VOICE_PROMPT = "multi_sim_voice_prompt";
+
+        /**
+          * Subscription to be used for data call on a multi sim device. The supported values
+          * are 0 = SUB1, 1 = SUB2.
+          */
+        public static final String MULTI_SIM_DATA_CALL_SUBSCRIPTION = "multi_sim_data_call";
+
+        /**
+          * Subscription to be used for SMS on a multi sim device. The supported values
+          * are 0 = SUB1, 1 = SUB2.
+          */
+        public static final String MULTI_SIM_SMS_SUBSCRIPTION = "multi_sim_sms";
+
+        /**
+          * Default subscription. The supported values are 0 = SUB1 and 1 = SUB2.
+          * @hide
+          */
+        public static final String DEFAULT_SUBSCRIPTION = "default_subscription";
+
+        /** User preferred subscriptions setting.
+          * This holds the details of the user selected subscription from the card and
+          * the activation status. Each settings string have the coma separated values
+          * iccId,appType,appId,activationStatus,3gppIndex,3gpp2Index
+          * @hide
+         */
+        public static final String[] USER_PREFERRED_SUBS = {"user_preferred_sub1",
+                "user_preferred_sub2"};
 
         /**
          * CDMA only settings
@@ -1915,6 +1987,7 @@ public final class Settings {
             VOLUME_SYSTEM,
             VOLUME_RING,
             VOLUME_MUSIC,
+            VOLUME_FM,
             VOLUME_ALARM,
             VOLUME_NOTIFICATION,
             VOLUME_BLUETOOTH_SCO,
@@ -2285,6 +2358,41 @@ public final class Settings {
         }
 
         /**
+         * Convenience function for retrieving a value from the secure settings
+         * value list as an integer.  Note that internally setting values are
+         * always stored as strings; this function converts the string to an
+         * integer for you.
+         * <p>
+         * This version does not take a default value.  If the setting has not
+         * been set, or the string value is not a number,
+         * it throws {@link SettingNotFoundException}.
+         *
+         * @param cr The ContentResolver to access.
+         * @param name The name of the setting to retrieve.
+         * @param index The index of the list
+         *
+         * @throws SettingNotFoundException Thrown if a setting by the given
+         * name can't be found or the setting value is not an integer.
+         *
+         * @return The value at the given index of settings.
+         */
+        public static int getIntAtIndex(ContentResolver cr, String name, int index)
+                throws SettingNotFoundException {
+            String v = getString(cr, name);
+            if (v != null) {
+                String valArray[] = v.split(",");
+                if ((index >= 0) && (index < valArray.length) && (valArray[index] != null)) {
+                    try {
+                        return Integer.parseInt(valArray[index]);
+                    } catch (NumberFormatException e) {
+                        Log.e(TAG, "Exception while parsing Integer: ", e);
+                    }
+                }
+            }
+            throw new SettingNotFoundException(name);
+        }
+
+        /**
          * Convenience function for updating a single settings value as an
          * integer. This will either create a new entry in the table if the
          * given name does not exist, or modify the value of the existing row
@@ -2299,6 +2407,49 @@ public final class Settings {
          */
         public static boolean putInt(ContentResolver cr, String name, int value) {
             return putString(cr, name, Integer.toString(value));
+        }
+
+        /**
+         * Convenience function for updating settings value as coma separated
+         * integer values. This will either create a new entry in the table if the
+         * given name does not exist, or modify the value of the existing row
+         * with that name.  Note that internally setting values are always
+         * stored as strings, so this function converts the given value to a
+         * string before storing it.
+         *
+         * @param cr The ContentResolver to access.
+         * @param name The name of the setting to modify.
+         * @param index The index of the list
+         * @param value The new value for the setting to be added to the list.
+         * @return true if the value was set, false on database errors
+         */
+        public static boolean putIntAtIndex(ContentResolver cr, String name, int index, int value) {
+            String data = "";
+            String valArray[] = null;
+            String v = getString(cr, name);
+
+            if (v != null) {
+                valArray = v.split(",");
+            }
+
+            // Copy the elements from valArray till index
+            for (int i = 0; i < index; i++) {
+                String str = "";
+                if ((valArray != null) && (i < valArray.length)) {
+                    str = valArray[i];
+                }
+                data = data + str + ",";
+            }
+
+            data = data + value;
+
+            // Copy the remaining elements from valArray if any.
+            if (valArray != null) {
+                for (int i = index+1; i < valArray.length; i++) {
+                    data = data + "," + valArray[i];
+                }
+            }
+            return putString(cr, name, data);
         }
 
         /**

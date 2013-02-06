@@ -110,6 +110,9 @@ public class SmsMessage extends SmsMessageBase {
         } catch (RuntimeException ex) {
             Log.e(LOG_TAG, "SMS PDU parsing failed: ", ex);
             return null;
+        } catch (OutOfMemoryError e) {
+            Log.e(LOG_TAG, "SMS PDU parsing failed with out of memory: ", e);
+            return null;
         }
     }
 
@@ -453,8 +456,9 @@ public class SmsMessage extends SmsMessageBase {
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#TELESERVICE_WEMT},
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#TELESERVICE_VMN},
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#TELESERVICE_WAP}
+     * @hide
     */
-    /* package */ int getTeleService() {
+    public int getTeleService() {
         return mEnvelope.teleService;
     }
 
@@ -464,9 +468,55 @@ public class SmsMessage extends SmsMessageBase {
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#MESSAGE_TYPE_POINT_TO_POINT},
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#MESSAGE_TYPE_BROADCAST},
      *  {@link com.android.internal.telephony.cdma.sms.SmsEnvelope#MESSAGE_TYPE_ACKNOWLEDGE},
+     * @hide
     */
-    /* package */ int getMessageType() {
+    public int getMessageType() {
         return mEnvelope.messageType;
+    }
+
+    /**
+     * Returns service category of the message.
+     * @return service category
+     * @hide
+    */
+    public int getServiceCategory() {
+        return mEnvelope.serviceCategory;
+    }
+
+    /**
+     * Returns severity of the emergency message.
+     * @return severity
+     * @hide
+    */
+    public android.telephony.EmergencyMessage.Severity getSeverity() {
+        return mBearerData.userData.severity;
+    }
+
+    /**
+     * Returns urgency of the emergency message.
+     * @return urgency
+     * @hide
+    */
+    public android.telephony.EmergencyMessage.Urgency getUrgency() {
+        return mBearerData.userData.urgency;
+    }
+
+    /**
+     * Returns certainty of the emergency message.
+     * @return certainty
+     * @hide
+    */
+    public android.telephony.EmergencyMessage.Certainty getCertainty() {
+        return mBearerData.userData.certainty;
+    }
+
+    /**
+     * Returns language of the emergency message.
+     * @return language
+     * @hide
+    */
+    public int getLanguage() {
+        return mBearerData.userData.language;
     }
 
     /**
@@ -495,6 +545,13 @@ public class SmsMessage extends SmsMessageBase {
 
             length = dis.readByte();
             addr.numberOfDigits = length;
+
+            // sanity check on the length
+            if (length > pdu.length) {
+                throw new RuntimeException(
+                        "createFromPdu: Invalid pdu, addr.numberOfDigits " + length
+                        + " > pdu len " + pdu.length);
+            }
             addr.origBytes = new byte[length];
             dis.read(addr.origBytes, 0, length); // digits
 
@@ -506,11 +563,18 @@ public class SmsMessage extends SmsMessageBase {
 
             //encoded BearerData:
             bearerDataLength = dis.readInt();
+            // sanity check on the length
+            if (bearerDataLength > pdu.length) {
+                throw new RuntimeException(
+                        "createFromPdu: Invalid pdu, bearerDataLength " + bearerDataLength
+                        + " > pdu len " + pdu.length);
+            }
             env.bearerData = new byte[bearerDataLength];
             dis.read(env.bearerData, 0, bearerDataLength);
             dis.close();
-        } catch (Exception ex) {
-            Log.e(LOG_TAG, "createFromPdu: conversion from byte array to object failed: " + ex);
+        } catch (IOException ex) {
+            throw new RuntimeException(
+                    "createFromPdu: conversion from byte array to object failed: " + ex, ex);
         }
 
         // link the filled objects to this SMS
@@ -661,8 +725,9 @@ public class SmsMessage extends SmsMessageBase {
 
     /**
      * Parses a SMS message from its BearerData stream. (mobile-terminated only)
+     * @hide
      */
-    protected void parseSms() {
+    public void parseSms() {
         // Message Waiting Info Record defined in 3GPP2 C.S-0005, 3.7.5.6
         // It contains only an 8-bit number with the number of messages waiting
         if (mEnvelope.teleService == SmsEnvelope.TELESERVICE_MWI) {
@@ -676,7 +741,7 @@ public class SmsMessage extends SmsMessageBase {
             }
             return;
         }
-        mBearerData = BearerData.decode(mEnvelope.bearerData);
+        mBearerData = BearerData.decode(mEnvelope.bearerData, mEnvelope.isCmas());
         if (Log.isLoggable(LOGGABLE_TAG, Log.VERBOSE)) {
             Log.d(LOG_TAG, "MT raw BearerData = '" +
                       HexDump.toHexString(mEnvelope.bearerData) + "'");
@@ -939,7 +1004,7 @@ public class SmsMessage extends SmsMessageBase {
     /** This function  shall be called to get the number of voicemails.
      * @hide
      */
-    /*package*/ int getNumOfVoicemails() {
+    public int getNumOfVoicemails() {
         return mBearerData.numberOfMessages;
     }
 
@@ -950,9 +1015,10 @@ public class SmsMessage extends SmsMessageBase {
      * @return byte array uniquely identifying the message.
      * @hide
      */
-    /* package */ byte[] getIncomingSmsFingerprint() {
+    public byte[] getIncomingSmsFingerprint() {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
+        output.write(mEnvelope.serviceCategory);
         output.write(mEnvelope.teleService);
         output.write(mEnvelope.origAddress.origBytes, 0, mEnvelope.origAddress.origBytes.length);
         output.write(mEnvelope.bearerData, 0, mEnvelope.bearerData.length);

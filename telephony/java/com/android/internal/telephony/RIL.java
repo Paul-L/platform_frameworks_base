@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,23 +41,32 @@ import android.os.Message;
 import android.os.Parcel;
 import android.os.PowerManager;
 import android.os.SystemProperties;
+import android.os.RegistrantList;
 import android.os.PowerManager.WakeLock;
 import android.telephony.NeighboringCellInfo;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SignalStrength;
 import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.text.TextUtils;
 import android.util.Log;
 
 import com.android.internal.telephony.gsm.SmsBroadcastConfigInfo;
+import com.android.internal.telephony.gsm.SsData;
 import com.android.internal.telephony.gsm.SuppServiceNotification;
+import com.android.internal.telephony.IccCardApplicationStatus;
 import com.android.internal.telephony.cdma.CdmaCallWaitingNotification;
 import com.android.internal.telephony.cdma.CdmaInformationRecords;
+import com.android.internal.telephony.IccRefreshResponse;
+import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
+import com.android.internal.telephony.cdma.DataProfileOmh;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 
@@ -226,10 +236,22 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     // WAKE_LOCK_TIMEOUT occurs.
     int mRequestMessagesWaiting;
 
+    private static final boolean MULTI_SIM_ENABLED = SystemProperties.getBoolean(
+            TelephonyProperties.PROPERTY_MULTI_SIM_ENABLED, false);
+
+    // In case of Multi SIM, Phone App should take the control over
+    // the modem to activate the subscriptions on powerup.  So if the
+    // radio state in RADIO_ON on powerup or on rild socket reconnect,
+    // we need to power off the modem explicitly.  This flag is set
+    // to true only in case of Multi SIM enabled cases.
+    private boolean mRilPowerOff;
+
     //I'd rather this be LinkedList or something
     ArrayList<RILRequest> mRequestsList = new ArrayList<RILRequest>();
 
     Object     mLastNITZTimeInfo;
+
+    private Integer mInstanceId;
 
     //***** Events
 
@@ -244,6 +266,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     static final int RESPONSE_UNSOLICITED = 1;
 
     static final String SOCKET_NAME_RIL = "rild";
+    static final String SOCKET_NAME_RIL1 = "rild1";
 
     static final int SOCKET_OPEN_RETRY_MILLIS = 4 * 1000;
 
@@ -495,14 +518,28 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         public void
         run() {
             int retryCount = 0;
+            String rilSocket = "rild";
 
             try {for (;;) {
                 LocalSocket s = null;
                 LocalSocketAddress l;
 
+                boolean multiRild = SystemProperties.getBoolean("ro.multi.rild", false);
+
+                // Use 'rild' socket in case of
+                //  - Non-dsds (mInstanceId will be null)
+                //  - First instance if DSDS and Multi rild enabled
+                //  - DSDS and Multi rild is not enabled.
+                // Use 'rild1' socket for second instance in DSDS and Multi rild enabled
+                if (mInstanceId == null || mInstanceId == 0 || multiRild == false) {
+                    rilSocket = SOCKET_NAME_RIL;
+                } else {
+                    rilSocket = SOCKET_NAME_RIL1;
+                }
+
                 try {
                     s = new LocalSocket();
-                    l = new LocalSocketAddress(SOCKET_NAME_RIL,
+                    l = new LocalSocketAddress(rilSocket,
                             LocalSocketAddress.Namespace.RESERVED);
                     s.connect(l);
                 } catch (IOException ex){
@@ -519,12 +556,12 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
                     if (retryCount == 8) {
                         Log.e (LOG_TAG,
-                            "Couldn't find '" + SOCKET_NAME_RIL
+                            "Couldn't find '" + rilSocket
                             + "' socket after " + retryCount
                             + " times, continuing to retry silently");
                     } else if (retryCount > 0 && retryCount < 8) {
                         Log.i (LOG_TAG,
-                            "Couldn't find '" + SOCKET_NAME_RIL
+                            "Couldn't find '" + rilSocket
                             + "' socket; retrying after timeout");
                     }
 
@@ -540,7 +577,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
                 retryCount = 0;
 
                 mSocket = s;
-                Log.i(LOG_TAG, "Connected to '" + SOCKET_NAME_RIL + "' socket");
+                Log.i(LOG_TAG, "Connected to '" + rilSocket + "' socket");
 
                 int length = 0;
                 try {
@@ -566,15 +603,20 @@ public final class RIL extends BaseCommands implements CommandsInterface {
                         p.recycle();
                     }
                 } catch (java.io.IOException ex) {
-                    Log.i(LOG_TAG, "'" + SOCKET_NAME_RIL + "' socket closed",
+                    Log.i(LOG_TAG, "'" + rilSocket + "' socket closed",
                           ex);
                 } catch (Throwable tr) {
                     Log.e(LOG_TAG, "Uncaught exception read length=" + length +
                         "Exception:" + tr.toString());
                 }
 
-                Log.i(LOG_TAG, "Disconnected from '" + SOCKET_NAME_RIL
+                Log.i(LOG_TAG, "Disconnected from '" + rilSocket
                       + "' socket");
+
+                // If RILD socket reconnects(ie., RILD process is restarted),
+                // then in case of MultiSim scenario we need to power off to
+                // to take the control over the modem.
+                mRilPowerOff = MULTI_SIM_ENABLED;
 
                 setRadioState (RadioState.RADIO_UNAVAILABLE);
 
@@ -602,6 +644,11 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     //***** Constructors
 
     public RIL(Context context, int preferredNetworkType, int cdmaSubscription) {
+        this(context, preferredNetworkType, cdmaSubscription, null);
+    }
+
+    public RIL(Context context, int preferredNetworkType,
+            int cdmaSubscription, Integer instanceId) {
         super(context);
         if (RILJ_LOGD) {
             riljLog("RIL(context, preferredNetworkType=" + preferredNetworkType +
@@ -610,6 +657,8 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         mCdmaSubscription  = cdmaSubscription;
         mPreferredNetworkType = preferredNetworkType;
         mPhoneType = RILConstants.NO_PHONE;
+        mInstanceId = instanceId;
+        mRilPowerOff = MULTI_SIM_ENABLED;
 
         PowerManager pm = (PowerManager)context.getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, LOG_TAG);
@@ -644,6 +693,23 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
     //***** CommandsInterface implementation
 
+    public void getVoiceRadioTechnology(Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_VOICE_RADIO_TECH, result);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+
+        send(rr);
+    }
+
+    public void getImsRegistrationState(Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_IMS_REGISTRATION_STATE, result);
+
+        if (RILJ_LOGD)
+            riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+
+        send(rr);
+    }
+
     @Override public void
     setOnNITZTime(Handler h, int what, Object obj) {
         super.setOnNITZTime(h, what, obj);
@@ -668,7 +734,58 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         send(rr);
     }
 
+    public void setUiccSubscription(int slotId, int appIndex, int subId,
+            int subStatus, Message result) {
+        //Note: This RIL request is also valid for SIM and RUIM (ICC card)
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_SET_UICC_SUBSCRIPTION, result);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " slot: " + slotId + " appIndex: " + appIndex
+                + " subId: " + subId + " subStatus: " + subStatus);
+
+        rr.mp.writeInt(slotId);
+        rr.mp.writeInt(appIndex);
+        rr.mp.writeInt(subId);
+        rr.mp.writeInt(subStatus);
+
+        send(rr);
+    }
+
+    public void setSubscriptionMode(int subscriptionMode, Message result) {
+        /* Sets the subscription mode Single SIM mode or Dual SIM mode
+         * This request does not come into picture in Single SIM mode.
+         */
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_SET_SUBSCRIPTION_MODE, result);
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " subscriptionMode: " + subscriptionMode);
+        rr.mp.writeInt(1);
+        rr.mp.writeInt(subscriptionMode);
+        send(rr);
+    }
+
+    public void setDataSubscription(Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_SET_DATA_SUBSCRIPTION, result);
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+        send(rr);
+    }
+
     @Override public void
+    getDataCallProfile(int appType, Message result) {
+        RILRequest rr = RILRequest.obtain(
+                RILConstants.RIL_REQUEST_GET_DATA_CALL_PROFILE, result);
+
+        // count of ints
+        rr.mp.writeInt(1);
+        rr.mp.writeInt(appType);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " : " + appType);
+
+        send(rr);
+    }
+
+    @Override
+    public void
     supplyIccPin(String pin, Message result) {
         supplyIccPinForApp(pin, null, result);
     }
@@ -807,12 +924,13 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     }
 
     public void
-    supplyNetworkDepersonalization(String netpin, Message result) {
-        RILRequest rr = RILRequest.obtain(RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION, result);
+    supplyDepersonalization(String netpin, int type, Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_ENTER_DEPERSONALIZATION_CODE, result);
 
-        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest) +
+                        " Type:" + type);
 
-        rr.mp.writeInt(1);
+        rr.mp.writeInt(type);
         rr.mp.writeString(netpin);
 
         send(rr);
@@ -870,9 +988,19 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
     public void
     getIMSI(Message result) {
+        getIMSIForApp(null, result);
+    }
+
+    public void
+    getIMSIForApp(String aid, Message result) {
         RILRequest rr = RILRequest.obtain(RIL_REQUEST_GET_IMSI, result);
 
-        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+        rr.mp.writeInt(1);
+        rr.mp.writeString(aid);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() +
+                              "> getIMSI: " + requestToString(rr.mRequest)
+                              + " aid: " + aid);
 
         send(rr);
     }
@@ -1158,14 +1286,19 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         send(rr);
     }
 
+    private void
+    constructGsmSendSmsRilRequest (RILRequest rr, String smscPDU, String pdu) {
+        rr.mp.writeInt(2);
+        rr.mp.writeString(smscPDU);
+        rr.mp.writeString(pdu);
+    }
+
     public void
     sendSMS (String smscPDU, String pdu, Message result) {
         RILRequest rr
                 = RILRequest.obtain(RIL_REQUEST_SEND_SMS, result);
 
-        rr.mp.writeInt(2);
-        rr.mp.writeString(smscPDU);
-        rr.mp.writeString(pdu);
+        constructGsmSendSmsRilRequest(rr, smscPDU, pdu);
 
         if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
 
@@ -1173,15 +1306,119 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     }
 
     public void
-    sendCdmaSms(byte[] pdu, Message result) {
+    setupQosReq (int callId, ArrayList<String> qosFlows, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_SETUP_QOS, result);
+
+        int qosFlowsCnt = qosFlows.size();
+
+        rr.mp.writeInt(qosFlowsCnt + 1); // num flows and callId
+        rr.mp.writeString(Integer.toString(callId));
+
+        for (String string : (String[])qosFlows.toArray(new String[0])) {
+            rr.mp.writeString(string);
+        }
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " callId:" + callId + ", " + qosFlows);
+
+        send(rr);
+
+    }
+
+    public void
+    releaseQos (int qosId, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_RELEASE_QOS, result);
+
+        rr.mp.writeInt(1);
+        rr.mp.writeString(Integer.toString(qosId));
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " qosId:" + qosId + " (0x" + Integer.toHexString(qosId) + ")");
+
+        send(rr);
+
+    }
+
+    public void
+    modifyQos (int qosId, ArrayList<String> qosFlows, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_MODIFY_QOS, result);
+
+        int qosFlowsCnt = qosFlows.size();
+
+        rr.mp.writeInt(qosFlowsCnt + 1); // num flows and callId
+        rr.mp.writeString(Integer.toString(qosId));
+
+        for (String string : (String[])qosFlows.toArray(new String[0])) {
+            rr.mp.writeString(string);
+        }
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " qosId:" + qosId + " (0x" + Integer.toHexString(qosId) + "), " + qosFlows);
+
+        send(rr);
+
+    }
+
+    public void
+    suspendQos (int qosId, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_SUSPEND_QOS, result);
+
+        rr.mp.writeInt(1);
+        rr.mp.writeString(Integer.toString(qosId));
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " qosId:" + qosId + " (0x" + Integer.toHexString(qosId) + ")");
+
+        send(rr);
+
+    }
+
+    public void
+    resumeQos (int qosId, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_RESUME_QOS, result);
+
+        rr.mp.writeInt(1);
+        rr.mp.writeString(Integer.toString(qosId));
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " qosId:" + qosId + " (0x" + Integer.toHexString(qosId) + ")");
+
+        send(rr);
+
+    }
+
+    public void
+    getQosStatus (int qosId, Message result) {
+
+        RILRequest rr
+            = RILRequest.obtain(RIL_REQUEST_GET_QOS_STATUS, result);
+
+        rr.mp.writeInt(1);
+        rr.mp.writeString(Integer.toString(qosId));
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                + " qosId:" + qosId + " (0x" + Integer.toHexString(qosId) + ")");
+
+        send(rr);
+
+    }
+    private void
+    constructCdmaSendSmsRilRequest(RILRequest rr, byte[] pdu) {
         int address_nbr_of_digits;
         int subaddr_nbr_of_digits;
         int bearerDataLength;
         ByteArrayInputStream bais = new ByteArrayInputStream(pdu);
         DataInputStream dis = new DataInputStream(bais);
-
-        RILRequest rr
-                = RILRequest.obtain(RIL_REQUEST_CDMA_SEND_SMS, result);
 
         try {
             rr.mp.writeInt(dis.readInt()); //teleServiceId
@@ -1213,6 +1450,45 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             if (RILJ_LOGD) riljLog("sendSmsCdma: conversion from input stream to object failed: "
                     + ex);
         }
+    }
+
+    public void
+    sendCdmaSms(byte[] pdu, Message result) {
+        RILRequest rr
+                = RILRequest.obtain(RIL_REQUEST_CDMA_SEND_SMS, result);
+
+        constructCdmaSendSmsRilRequest(rr, pdu);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+
+        send(rr);
+    }
+
+    public void
+    sendImsGsmSms (String smscPDU, String pdu, int retry, int messageRef,
+            Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_IMS_SEND_SMS, result);
+
+        rr.mp.writeInt(1); //RadioTechnologyFamily.RADIO_TECH_3GPP;
+        rr.mp.writeByte((byte)retry);
+        rr.mp.writeInt(messageRef);
+
+        constructGsmSendSmsRilRequest(rr, smscPDU, pdu);
+
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+
+        send(rr);
+    }
+
+    public void
+    sendImsCdmaSms(byte[] pdu, int retry, int messageRef, Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_IMS_SEND_SMS, result);
+
+        rr.mp.writeInt(2); //RadioTechnologyFamily.RADIO_TECH_3GPP2;
+        rr.mp.writeByte((byte)retry);
+        rr.mp.writeInt(messageRef);
+
+        constructCdmaSendSmsRilRequest(rr, pdu);
 
         if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
 
@@ -1348,19 +1624,24 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         send(rr);
     }
 
-    public void
+    synchronized public void
     setRadioPower(boolean on, Message result) {
-        RILRequest rr = RILRequest.obtain(RIL_REQUEST_RADIO_POWER, result);
+        if (!mRadioPowerIsInProgress) {
+            mRadioPowerIsInProgress = true;
+            RILRequest rr = RILRequest.obtain(RIL_REQUEST_RADIO_POWER, result);
 
-        rr.mp.writeInt(1);
-        rr.mp.writeInt(on ? 1 : 0);
+            rr.mp.writeInt(1);
+            rr.mp.writeInt(on ? 1 : 0);
 
-        if (RILJ_LOGD) {
-            riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
-                    + (on ? " on" : " off"));
+            if (RILJ_LOGD) {
+                riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                        + (on ? " on" : " off"));
+            }
+
+            send(rr);
+        } else {
+            riljLog("Previous radio power request is in progress ignore current request");
         }
-
-        send(rr);
     }
 
     public void
@@ -1425,6 +1706,11 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     public void
     iccIO (int command, int fileid, String path, int p1, int p2, int p3,
             String data, String pin2, Message result) {
+        iccIOForApp(command, fileid, path, p1, p2, p3, data, pin2, null, result);
+    }
+    public void
+    iccIOForApp (int command, int fileid, String path, int p1, int p2, int p3,
+            String data, String pin2, String aid, Message result) {
         //Note: This RIL request has not been renamed to ICC,
         //       but this request is also valid for SIM and RUIM
         RILRequest rr
@@ -1438,12 +1724,15 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         rr.mp.writeInt(p3);
         rr.mp.writeString(data);
         rr.mp.writeString(pin2);
+        rr.mp.writeString(aid);
 
-        if (RILJ_LOGD) riljLog(rr.serialString() + "> iccIO: " + requestToString(rr.mRequest)
+        if (RILJ_LOGD) riljLog(rr.serialString() + "> iccIO: "
+                + requestToString(rr.mRequest)
                 + " 0x" + Integer.toHexString(command)
                 + " 0x" + Integer.toHexString(fileid) + " "
                 + " path: " + path + ","
-                + p1 + "," + p2 + "," + p3);
+                + p1 + "," + p2 + "," + p3
+                + " aid: " + aid);
 
         send(rr);
     }
@@ -2020,14 +2309,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         switch(stateInt) {
             case 0: state = RadioState.RADIO_OFF; break;
             case 1: state = RadioState.RADIO_UNAVAILABLE; break;
-            case 2: state = RadioState.SIM_NOT_READY; break;
-            case 3: state = RadioState.SIM_LOCKED_OR_ABSENT; break;
-            case 4: state = RadioState.SIM_READY; break;
-            case 5: state = RadioState.RUIM_NOT_READY; break;
-            case 6: state = RadioState.RUIM_READY; break;
-            case 7: state = RadioState.RUIM_LOCKED_OR_ABSENT; break;
-            case 8: state = RadioState.NV_NOT_READY; break;
-            case 9: state = RadioState.NV_READY; break;
+            case 10: state = RadioState.RADIO_ON; break;
 
             default:
                 throw new RuntimeException(
@@ -2037,6 +2319,18 @@ public final class RIL extends BaseCommands implements CommandsInterface {
     }
 
     private void switchToRadioState(RadioState newState) {
+        if (mRilPowerOff) {
+            Log.i(LOG_TAG, "Socket Reconnected / Init");
+            mRilPowerOff = false;
+            if (newState.isOn()) {
+                /* In case of MultiSIM, when rild restarts and socket reconnects
+                 * power off the modem and power on explicitly.
+                 */
+                if (RILJ_LOGD) Log.d(LOG_TAG, "Radio ON @ Socket Connect; reset to OFF");
+                setRadioPower(false, null);
+                return;
+            }
+        }
         setRadioState(newState);
     }
 
@@ -2186,7 +2480,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_ENTER_SIM_PUK2: ret =  responseInts(p); break;
             case RIL_REQUEST_CHANGE_SIM_PIN: ret =  responseInts(p); break;
             case RIL_REQUEST_CHANGE_SIM_PIN2: ret =  responseInts(p); break;
-            case RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION: ret =  responseInts(p); break;
+            case RIL_REQUEST_ENTER_DEPERSONALIZATION_CODE: ret =  responseInts(p); break;
             case RIL_REQUEST_GET_CURRENT_CALLS: ret =  responseCallList(p); break;
             case RIL_REQUEST_DIAL: ret =  responseVoid(p); break;
             case RIL_REQUEST_GET_IMSI: ret =  responseString(p); break;
@@ -2204,6 +2498,12 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_RADIO_POWER: ret =  responseVoid(p); break;
             case RIL_REQUEST_DTMF: ret =  responseVoid(p); break;
             case RIL_REQUEST_SEND_SMS: ret =  responseSMS(p); break;
+            case RIL_REQUEST_SETUP_QOS: ret =  responseStrings(p); break;
+            case RIL_REQUEST_GET_QOS_STATUS: ret = responseStrings(p); break;
+            case RIL_REQUEST_RELEASE_QOS: ret = responseStrings(p); break;
+            case RIL_REQUEST_MODIFY_QOS: ret = responseStrings(p); break;
+            case RIL_REQUEST_SUSPEND_QOS: ret = responseStrings(p); break;
+            case RIL_REQUEST_RESUME_QOS: ret = responseStrings(p); break;
             case RIL_REQUEST_SEND_SMS_EXPECT_MORE: ret =  responseSMS(p); break;
             case RIL_REQUEST_SETUP_DATA_CALL: ret =  responseSetupDataCall(p); break;
             case RIL_REQUEST_SIM_IO: ret =  responseICC_IO(p); break;
@@ -2283,7 +2583,17 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_REPORT_SMS_MEMORY_STATUS: ret = responseVoid(p); break;
             case RIL_REQUEST_REPORT_STK_SERVICE_IS_RUNNING: ret = responseVoid(p); break;
             case RIL_REQUEST_CDMA_GET_SUBSCRIPTION_SOURCE: ret =  responseInts(p); break;
+            case RIL_REQUEST_GET_DATA_CALL_PROFILE: ret = responseGetDataCallProfile(p); break;
             case RIL_REQUEST_ISIM_AUTHENTICATION: ret =  responseString(p); break;
+            case RIL_REQUEST_VOICE_RADIO_TECH: ret = responseInts(p); break;
+            case RIL_REQUEST_IMS_REGISTRATION_STATE: ret = responseInts(p); break;
+            case RIL_REQUEST_IMS_SEND_SMS: ret =  responseSMS(p); break;
+            case RIL_REQUEST_SET_TRANSMIT_POWER: ret = responseVoid(p); break;
+            case RIL_REQUEST_SET_UICC_SUBSCRIPTION: ret = responseVoid(p); break;
+            case RIL_REQUEST_SET_DATA_SUBSCRIPTION: ret = responseVoid(p); break;
+            case RIL_REQUEST_GET_UICC_SUBSCRIPTION: ret = responseUiccSubscription(p); break;
+            case RIL_REQUEST_GET_DATA_SUBSCRIPTION: ret = responseInts(p); break;
+            case RIL_REQUEST_SET_SUBSCRIPTION_MODE: ret = responseVoid(p); break;
             case RIL_REQUEST_ACKNOWLEDGE_INCOMING_GSM_SMS_WITH_PDU: ret = responseVoid(p); break;
             case RIL_REQUEST_STK_SEND_ENVELOPE_WITH_STATUS: ret = responseICC_IO(p); break;
             default:
@@ -2403,6 +2713,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_UNSOL_RESPONSE_RADIO_STATE_CHANGED: ret =  responseVoid(p); break;
             case RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED: ret =  responseVoid(p); break;
             case RIL_UNSOL_RESPONSE_VOICE_NETWORK_STATE_CHANGED: ret =  responseVoid(p); break;
+            case RIL_UNSOL_DATA_NETWORK_STATE_CHANGED: ret =  responseVoid(p); break;
             case RIL_UNSOL_RESPONSE_NEW_SMS: ret =  responseString(p); break;
             case RIL_UNSOL_RESPONSE_NEW_SMS_STATUS_REPORT: ret =  responseString(p); break;
             case RIL_UNSOL_RESPONSE_NEW_SMS_ON_SIM: ret =  responseInts(p); break;
@@ -2416,7 +2727,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_UNSOL_STK_EVENT_NOTIFY: ret = responseString(p); break;
             case RIL_UNSOL_STK_CALL_SETUP: ret = responseInts(p); break;
             case RIL_UNSOL_SIM_SMS_STORAGE_FULL: ret =  responseVoid(p); break;
-            case RIL_UNSOL_SIM_REFRESH: ret =  responseInts(p); break;
+            case RIL_UNSOL_SIM_REFRESH: ret =  responseSimRefresh(p); break;
             case RIL_UNSOL_CALL_RING: ret =  responseCallRing(p); break;
             case RIL_UNSOL_RESTRICTED_STATE_CHANGED: ret = responseInts(p); break;
             case RIL_UNSOL_RESPONSE_SIM_STATUS_CHANGED:  ret =  responseVoid(p); break;
@@ -2434,6 +2745,13 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_UNSOl_CDMA_PRL_CHANGED: ret = responseInts(p); break;
             case RIL_UNSOL_EXIT_EMERGENCY_CALLBACK_MODE: ret = responseVoid(p); break;
             case RIL_UNSOL_RIL_CONNECTED: ret = responseInts(p); break;
+            case RIL_UNSOL_VOICE_RADIO_TECH_CHANGED: ret =  responseInts(p); break;
+            case RIL_UNSOL_RESPONSE_IMS_NETWORK_STATE_CHANGED: ret =  responseVoid(p); break;
+            case RIL_UNSOL_TETHERED_MODE_STATE_CHANGED: ret = responseInts(p); break;
+            case RIL_UNSOL_ON_SS: ret =  responseSSData(p); break;
+            case RIL_UNSOL_STK_CC_ALPHA_NOTIFY: ret =  responseString(p); break;
+            case RIL_UNSOL_UICC_SUBSCRIPTION_STATUS_CHANGED: ret =  responseInts(p); break;
+            case RIL_UNSOL_QOS_STATE_CHANGED_IND: ret = responseStrings(p); break;
 
             default:
                 throw new RuntimeException("Unrecognized unsol response: " + response);
@@ -2452,6 +2770,12 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
                 switchToRadioState(newState);
             break;
+            case RIL_UNSOL_RESPONSE_IMS_NETWORK_STATE_CHANGED:
+                if (RILJ_LOGD) unsljLog(response);
+
+                mImsNetworkStateChangedRegistrants
+                    .notifyRegistrants(new AsyncResult(null, null, null));
+                break;
             case RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED:
                 if (RILJ_LOGD) unsljLog(response);
 
@@ -2462,6 +2786,12 @@ public final class RIL extends BaseCommands implements CommandsInterface {
                 if (RILJ_LOGD) unsljLog(response);
 
                 mVoiceNetworkStateRegistrants
+                    .notifyRegistrants(new AsyncResult(null, null, null));
+            break;
+            case RIL_UNSOL_DATA_NETWORK_STATE_CHANGED:
+                if (RILJ_LOGD) unsljLog(response);
+
+                mDataNetworkStateRegistrants
                     .notifyRegistrants(new AsyncResult(null, null, null));
             break;
             case RIL_UNSOL_RESPONSE_NEW_SMS: {
@@ -2553,7 +2883,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_UNSOL_DATA_CALL_LIST_CHANGED:
                 if (RILJ_LOGD) unsljLogRet(response, ret);
 
-                mDataNetworkStateRegistrants.notifyRegistrants(new AsyncResult(null, ret, null));
+                mDataCallListChangedRegistrants.notifyRegistrants(new AsyncResult(null, ret, null));
             break;
 
             case RIL_UNSOL_SUPP_SVC_NOTIFICATION:
@@ -2715,7 +3045,14 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
             case RIL_UNSOL_OEM_HOOK_RAW:
                 if (RILJ_LOGD) unsljLogvRet(response, IccUtils.bytesToHexString((byte[])ret));
-                if (mUnsolOemHookRawRegistrant != null) {
+                ByteBuffer oemHookResponse = ByteBuffer.wrap((byte[])ret);
+                oemHookResponse.order(ByteOrder.nativeOrder());
+
+                if (isQcUnsolOemHookResp(oemHookResponse)) {
+                    Log.d(LOG_TAG, "OEM ID check Passed");
+                    processUnsolOemhookResponse(oemHookResponse);
+                } else if (mUnsolOemHookRawRegistrant != null) {
+                    Log.d(LOG_TAG, "External OEM message, to be notified");
                     mUnsolOemHookRawRegistrant.notifyRegistrant(new AsyncResult(null, ret, null));
                 }
                 break;
@@ -2738,11 +3075,38 @@ public final class RIL extends BaseCommands implements CommandsInterface {
                 }
                 break;
 
+            case RIL_UNSOL_VOICE_RADIO_TECH_CHANGED:
+                if (RILJ_LOGD) unsljLogRet(response, ret);
+
+                if (mVoiceRadioTechChangedRegistrants != null) {
+                    mVoiceRadioTechChangedRegistrants.notifyRegistrants(
+                            new AsyncResult(null, ret, null));
+                }
+                break;
+
             case RIL_UNSOL_CDMA_SUBSCRIPTION_SOURCE_CHANGED:
                 if (RILJ_LOGD) unsljLogRet(response, ret);
 
                 if (mCdmaSubscriptionChangedRegistrants != null) {
                     mCdmaSubscriptionChangedRegistrants.notifyRegistrants(
+                                        new AsyncResult (null, ret, null));
+                }
+                break;
+
+            case RIL_UNSOL_ON_SS:
+                if (RILJ_LOGD) unsljLogRet(response, ret);
+
+                if (mSSRegistrant != null) {
+                    mSSRegistrant.notifyRegistrant(
+                                        new AsyncResult (null, ret, null));
+                }
+                break;
+
+            case RIL_UNSOL_STK_CC_ALPHA_NOTIFY:
+                if (RILJ_LOGD) unsljLogRet(response, ret);
+
+                if (mCatCcAlphaRegistrant != null) {
+                    mCatCcAlphaRegistrant.notifyRegistrant(
                                         new AsyncResult (null, ret, null));
                 }
                 break;
@@ -2769,12 +3133,40 @@ public final class RIL extends BaseCommands implements CommandsInterface {
                 if (RILJ_LOGD) unsljLogRet(response, ret);
 
                 // Initial conditions
-                setRadioPower(false, null);
-                setPreferredNetworkType(mPreferredNetworkType, null);
-                setCdmaSubscriptionSource(mCdmaSubscription, null);
+                //setRadioPower(false, null);
+                //setPreferredNetworkType(mPreferredNetworkType, null);
+                //setCdmaSubscriptionSource(mCdmaSubscription, null);
                 notifyRegistrantsRilConnectionChanged(((int[])ret)[0]);
                 break;
             }
+
+            case RIL_UNSOL_TETHERED_MODE_STATE_CHANGED:
+                if (RILJ_LOGD) unsljLogvRet(response, ret);
+                if (mTetheredModeStateRegistrants != null) {
+                    if (ret != null) {
+                        mTetheredModeStateRegistrants.notifyRegistrants(
+                                new AsyncResult (null, ret, null));
+                    } else {
+                        Log.e(LOG_TAG, "null returned, expected non-null");
+                    }
+                }
+                break;
+
+            case RIL_UNSOL_UICC_SUBSCRIPTION_STATUS_CHANGED:
+                if (RILJ_LOGD) unsljLogRet(response, ret);
+                if (mSubscriptionStatusRegistrants != null) {
+                    mSubscriptionStatusRegistrants.notifyRegistrants(
+                            new AsyncResult (null, ret, null));
+                }
+                break;
+
+            case RIL_UNSOL_QOS_STATE_CHANGED_IND:
+                if (RILJ_LOGD) unsljLogRet(response, ret);
+                if (mQosStateChangedIndRegistrants != null) {
+                    mQosStateChangedIndRegistrants.notifyRegistrants(
+                                        new AsyncResult (null, ret, null));
+                }
+                break;
         }
     }
 
@@ -2789,6 +3181,101 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             mRilConnectedRegistrants.notifyRegistrants(
                                 new AsyncResult (null, new Integer(rilVer), null));
         }
+    }
+
+    private boolean isQcUnsolOemHookResp(ByteBuffer oemHookResponse) {
+        String mOemIdentifier = "QUALCOMM";
+        int INT_SIZE = 4;
+        int mHeaderSize = mOemIdentifier.length() + 2 * INT_SIZE;
+
+        /* Check OEM ID in UnsolOemHook response */
+        if (oemHookResponse.capacity() < mHeaderSize) {
+            /*
+             * size of UnsolOemHook message is less than expected, considered as
+             * External OEM's message
+             */
+            Log.d(LOG_TAG, "RIL_UNSOL_OEM_HOOK_RAW data size is " + oemHookResponse.capacity());
+            return false;
+        } else {
+            byte[] oem_id_bytes = new byte[mOemIdentifier.length()];
+            oemHookResponse.get(oem_id_bytes);
+            String oem_id_str = new String(oem_id_bytes);
+            Log.d(LOG_TAG, "Oem ID in RIL_UNSOL_OEM_HOOK_RAW is " + oem_id_str);
+            if (!oem_id_str.equals(mOemIdentifier)) {
+                /* OEM ID not matched, considered as External OEM's message */
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void processUnsolOemhookResponse(ByteBuffer oemHookResponse) {
+        /** Starting number for QCRILHOOK request and response IDs */
+        final int QCRILHOOK_BASE = 0x80000;
+
+        /** qcrilhook unsolicited response IDs */
+        final int QCRILHOOK_UNSOL_EXTENDED_DBM_INTL = QCRILHOOK_BASE + 1000;
+        final int QCRILHOOK_UNSOL_CDMA_BURST_DTMF = QCRILHOOK_BASE + 1001;
+        final int QCRILHOOK_UNSOL_CDMA_CONT_DTMF_START = QCRILHOOK_BASE + 1002;
+        final int QCRILHOOK_UNSOL_CDMA_CONT_DTMF_STOP = QCRILHOOK_BASE + 1003;
+
+        int response_id = 0, response_size = 0;
+
+        response_id = oemHookResponse.getInt();
+        Log.d(LOG_TAG, "Response ID in RIL_UNSOL_OEM_HOOK_RAW is " + response_id);
+
+        response_size = oemHookResponse.getInt();
+        if (response_size < 0) {
+            Log.e(LOG_TAG, "Response Size is Invalid " + response_size);
+            return;
+        }
+        byte[] response_data = new byte[response_size];
+        oemHookResponse.get(response_data, 0, response_size);
+
+        switch (response_id) {
+            case QCRILHOOK_UNSOL_CDMA_BURST_DTMF:
+                notifyCdmaFwdBurstDtmf(response_data);
+                break;
+
+            case QCRILHOOK_UNSOL_CDMA_CONT_DTMF_START:
+                notifyCdmaFwdContDtmfStart(response_data);
+                break;
+
+            case QCRILHOOK_UNSOL_CDMA_CONT_DTMF_STOP:
+                notifyCdmaFwdContDtmfStop();
+                break;
+
+            default:
+                Log.d(LOG_TAG, "Response ID " + response_id + "is not served in this process.");
+                Log.d(LOG_TAG, "To broadcast an Intent via the notifier to external apps");
+                if (mUnsolOemHookExtAppRegistrant != null) {
+                    oemHookResponse.rewind();
+                    byte[] origData = oemHookResponse.array();
+                    mUnsolOemHookExtAppRegistrant.notifyRegistrant(new AsyncResult(null, origData,
+                            null));
+                }
+                break;
+        }
+
+    }
+
+    /** Notify registrants of FWD Burst DTMF Tone. */
+
+    protected void notifyCdmaFwdBurstDtmf(byte[] data) {
+        AsyncResult ar = new AsyncResult(null, data, null);
+        mCdmaFwdBurstDtmfRegistrants.notifyRegistrants(ar);
+    }
+
+    /** Notify registrants of FWD Continuous DTMF Tone Start. */
+    protected void notifyCdmaFwdContDtmfStart(byte[] data) {
+        AsyncResult ar = new AsyncResult(null, data, null);
+        mCdmaFwdContDtmfStartRegistrants.notifyRegistrants(ar);
+    }
+
+    /** Notify registrants of FWD Continuous DTMF Tone Stop. */
+    protected void notifyCdmaFwdContDtmfStop() {
+        AsyncResult ar = new AsyncResult(null, null, null);
+        mCdmaFwdContDtmfStopRegistrants.notifyRegistrants(ar);
     }
 
     private Object
@@ -2931,24 +3418,23 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
     private Object
     responseIccCardStatus(Parcel p) {
-        IccCardApplication ca;
+        IccCardApplicationStatus ca;
 
         IccCardStatus status = new IccCardStatus();
         status.setCardState(p.readInt());
         status.setUniversalPinState(p.readInt());
-        status.setGsmUmtsSubscriptionAppIndex(p.readInt());
-        status.setCdmaSubscriptionAppIndex(p.readInt());
-        status.setImsSubscriptionAppIndex(p.readInt());
+        status.mGsmUmtsSubscriptionAppIndex = p.readInt();
+        status.mCdmaSubscriptionAppIndex = p.readInt();
+        status.mImsSubscriptionAppIndex = p.readInt();
         int numApplications = p.readInt();
 
         // limit to maximum allowed applications
         if (numApplications > IccCardStatus.CARD_MAX_APPS) {
             numApplications = IccCardStatus.CARD_MAX_APPS;
         }
-        status.setNumApplications(numApplications);
-
+        status.mApplications = new IccCardApplicationStatus[numApplications];
         for (int i = 0 ; i < numApplications ; i++) {
-            ca = new IccCardApplication();
+            ca = new IccCardApplicationStatus();
             ca.app_type       = ca.AppTypeFromRILInt(p.readInt());
             ca.app_state      = ca.AppStateFromRILInt(p.readInt());
             ca.perso_substate = ca.PersoSubstateFromRILInt(p.readInt());
@@ -2957,9 +3443,19 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             ca.pin1_replaced  = p.readInt();
             ca.pin1           = ca.PinStateFromRILInt(p.readInt());
             ca.pin2           = ca.PinStateFromRILInt(p.readInt());
-            status.addApplication(ca);
+            status.mApplications[i] = ca;
         }
         return status;
+    }
+
+    private Object
+    responseSimRefresh(Parcel p) {
+        IccRefreshResponse response = new IccRefreshResponse();
+
+        response.refreshResult = IccRefreshResponse.Result.values()[p.readInt()];
+        response.efId   = p.readInt();
+        response.aidPtr = p.readString();
+        return response;
     }
 
     private Object
@@ -3046,7 +3542,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             dataCall.type = p.readString();
             dataCall.ifname = p.readString();
             if ((dataCall.status == DataConnection.FailCause.NONE.getErrorCode()) &&
-                    TextUtils.isEmpty(dataCall.ifname)) {
+                    TextUtils.isEmpty(dataCall.ifname) && dataCall.active != 0) {
               throw new RuntimeException("getDataCallState, no ifname");
             }
             String addresses = p.readString();
@@ -3270,16 +3766,9 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
     private Object
     responseSignalStrength(Parcel p) {
-        int numInts = 12;
-        int response[];
-
-        /* TODO: Add SignalStrength class to match RIL_SignalStrength */
-        response = new int[numInts];
-        for (int i = 0 ; i < numInts ; i++) {
-            response[i] = p.readInt();
-        }
-
-        return response;
+        //Signal strength from RIL interface has to be validated
+        SignalStrength signalStrength = new SignalStrength(p,true);
+        return signalStrength;
     }
 
     private ArrayList<CdmaInformationRecords>
@@ -3330,6 +3819,34 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         response[3] = (char) p.readInt();    // signal
 
         return response;
+    }
+
+    private ArrayList<DataProfile>
+    responseGetDataCallProfile(Parcel p) {
+        int nProfiles = p.readInt();
+        if (RILJ_LOGD) riljLog("# data call profiles:" + nProfiles);
+
+        ArrayList<DataProfile> response = new ArrayList<DataProfile>(nProfiles);
+
+        int profileId = 0;
+        int priority = 0;
+        for (int i = 0; i < nProfiles; i++) {
+            profileId = p.readInt();
+            priority = p.readInt();
+            DataProfileOmh profile = new DataProfileOmh(profileId, priority);
+            if (RILJ_LOGD) riljLog("responseGetDataCallProfile()" +
+                    profile.getProfileId() + ":" + profile.getPriority());
+            response.add(profile);
+        }
+
+        return response;
+    }
+
+    private Object
+    responseUiccSubscription(Parcel p) {
+        //TODO MultiSIM functionality
+        //currently data subscripton is not queried from RIL.
+        return null;
     }
 
     private void
@@ -3395,7 +3912,7 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_ENTER_SIM_PUK2: return "ENTER_SIM_PUK2";
             case RIL_REQUEST_CHANGE_SIM_PIN: return "CHANGE_SIM_PIN";
             case RIL_REQUEST_CHANGE_SIM_PIN2: return "CHANGE_SIM_PIN2";
-            case RIL_REQUEST_ENTER_NETWORK_DEPERSONALIZATION: return "ENTER_NETWORK_DEPERSONALIZATION";
+            case RIL_REQUEST_ENTER_DEPERSONALIZATION_CODE: return "ENTER_DEPERSONALIZATION_CODE";
             case RIL_REQUEST_GET_CURRENT_CALLS: return "GET_CURRENT_CALLS";
             case RIL_REQUEST_DIAL: return "DIAL";
             case RIL_REQUEST_GET_IMSI: return "GET_IMSI";
@@ -3413,6 +3930,12 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_RADIO_POWER: return "RADIO_POWER";
             case RIL_REQUEST_DTMF: return "DTMF";
             case RIL_REQUEST_SEND_SMS: return "SEND_SMS";
+            case RIL_REQUEST_SETUP_QOS: return "SETUP_QOS";
+            case RIL_REQUEST_GET_QOS_STATUS: return "GET_QOS_STATUS";
+            case RIL_REQUEST_RELEASE_QOS: return "RELEASE_QOS";
+            case RIL_REQUEST_MODIFY_QOS: return "MODIFY_QOS";
+            case RIL_REQUEST_SUSPEND_QOS: return "SUSPEND_QOS";
+            case RIL_REQUEST_RESUME_QOS: return "RESUME_QOS";
             case RIL_REQUEST_SEND_SMS_EXPECT_MORE: return "SEND_SMS_EXPECT_MORE";
             case RIL_REQUEST_SETUP_DATA_CALL: return "SETUP_DATA_CALL";
             case RIL_REQUEST_SIM_IO: return "SIM_IO";
@@ -3492,7 +4015,17 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_REQUEST_REPORT_SMS_MEMORY_STATUS: return "RIL_REQUEST_REPORT_SMS_MEMORY_STATUS";
             case RIL_REQUEST_REPORT_STK_SERVICE_IS_RUNNING: return "RIL_REQUEST_REPORT_STK_SERVICE_IS_RUNNING";
             case RIL_REQUEST_CDMA_GET_SUBSCRIPTION_SOURCE: return "RIL_REQUEST_CDMA_GET_SUBSCRIPTION_SOURCE";
+            case RIL_REQUEST_GET_DATA_CALL_PROFILE: return "RIL_REQUEST_GET_DATA_CALL_PROFILE";
             case RIL_REQUEST_ISIM_AUTHENTICATION: return "RIL_REQUEST_ISIM_AUTHENTICATION";
+            case RIL_REQUEST_VOICE_RADIO_TECH: return "RIL_REQUEST_VOICE_RADIO_TECH";
+            case RIL_REQUEST_IMS_REGISTRATION_STATE: return "RIL_REQUEST_IMS_REGISTRATION_STATE";
+            case RIL_REQUEST_IMS_SEND_SMS: return "RIL_REQUEST_IMS_SEND_SMS";
+            case RIL_REQUEST_SET_TRANSMIT_POWER: return "RIL_REQUEST_SET_TRANSMIT_POWER";
+            case RIL_REQUEST_SET_UICC_SUBSCRIPTION: return "RIL_REQUEST_SET_UICC_SUBSCRIPTION";
+            case RIL_REQUEST_SET_DATA_SUBSCRIPTION: return "RIL_REQUEST_SET_DATA_SUBSCRIPTION";
+            case RIL_REQUEST_GET_UICC_SUBSCRIPTION: return "RIL_REQUEST_GET_UICC_SUBSCRIPTION";
+            case RIL_REQUEST_GET_DATA_SUBSCRIPTION: return "RIL_REQUEST_GET_DATA_SUBSCRIPTION";
+            case RIL_REQUEST_SET_SUBSCRIPTION_MODE: return "RIL_REQUEST_SET_SUBSCRIPTION_MODE";
             case RIL_REQUEST_ACKNOWLEDGE_INCOMING_GSM_SMS_WITH_PDU: return "RIL_REQUEST_ACKNOWLEDGE_INCOMING_GSM_SMS_WITH_PDU";
             case RIL_REQUEST_STK_SEND_ENVELOPE_WITH_STATUS: return "RIL_REQUEST_STK_SEND_ENVELOPE_WITH_STATUS";
             default: return "<unknown request>";
@@ -3537,22 +4070,33 @@ public final class RIL extends BaseCommands implements CommandsInterface {
             case RIL_UNSOL_CDMA_OTA_PROVISION_STATUS: return "UNSOL_CDMA_OTA_PROVISION_STATUS";
             case RIL_UNSOL_CDMA_INFO_REC: return "UNSOL_CDMA_INFO_REC";
             case RIL_UNSOL_OEM_HOOK_RAW: return "UNSOL_OEM_HOOK_RAW";
-            case RIL_UNSOL_RINGBACK_TONE: return "UNSOL_RINGBACK_TONG";
+            case RIL_UNSOL_RINGBACK_TONE: return "UNSOL_RINGBACK_TONE";
             case RIL_UNSOL_RESEND_INCALL_MUTE: return "UNSOL_RESEND_INCALL_MUTE";
             case RIL_UNSOL_CDMA_SUBSCRIPTION_SOURCE_CHANGED: return "CDMA_SUBSCRIPTION_SOURCE_CHANGED";
             case RIL_UNSOl_CDMA_PRL_CHANGED: return "UNSOL_CDMA_PRL_CHANGED";
             case RIL_UNSOL_EXIT_EMERGENCY_CALLBACK_MODE: return "UNSOL_EXIT_EMERGENCY_CALLBACK_MODE";
             case RIL_UNSOL_RIL_CONNECTED: return "UNSOL_RIL_CONNECTED";
-            default: return "<unknown reponse>";
+            case RIL_UNSOL_VOICE_RADIO_TECH_CHANGED: return "UNSOL_VOICE_RADIO_TECH_CHANGED";
+            case RIL_UNSOL_DATA_NETWORK_STATE_CHANGED: return "RIL_UNSOL_DATA_NETWORK_STATE_CHANGED";
+            case RIL_UNSOL_RESPONSE_IMS_NETWORK_STATE_CHANGED: return "UNSOL_RESPONSE_IMS_NETWORK_STATE_CHANGED";
+            case RIL_UNSOL_TETHERED_MODE_STATE_CHANGED: return "RIL_UNSOL_TETHERED_MODE_STATE_CHANGED";
+            case RIL_UNSOL_ON_SS: return "UNSOL_ON_SS";
+            case RIL_UNSOL_STK_CC_ALPHA_NOTIFY: return "UNSOL_STK_CC_ALPHA_NOTIFY";
+            case RIL_UNSOL_QOS_STATE_CHANGED_IND: return "RIL_UNSOL_QOS_STATE_CHANGED";
+            case RIL_UNSOL_UICC_SUBSCRIPTION_STATUS_CHANGED:
+                    return "RIL_UNSOL_UICC_SUBSCRIPTION_STATUS_CHANGED";
+            default: return "<unknown response>";
         }
     }
 
     private void riljLog(String msg) {
-        Log.d(LOG_TAG, msg);
+        Log.d(LOG_TAG, msg
+                + (mInstanceId != null ? (" [SUB" + mInstanceId + "]") : ""));
     }
 
     private void riljLogv(String msg) {
-        Log.v(LOG_TAG, msg);
+        Log.v(LOG_TAG, msg
+                + (mInstanceId != null ? (" [SUB" + mInstanceId + "]") : ""));
     }
 
     private void unsljLog(int response) {
@@ -3569,6 +4113,45 @@ public final class RIL extends BaseCommands implements CommandsInterface {
 
     private void unsljLogvRet(int response, Object ret) {
         riljLogv("[UNSL]< " + responseToString(response) + " " + retToString(response, ret));
+    }
+
+    private Object
+    responseSSData(Parcel p) {
+        int num;
+        SsData ssData = new SsData();
+
+        ssData.serviceType = ssData.ServiceTypeFromRILInt(p.readInt());
+        ssData.requestType = ssData.RequestTypeFromRILInt(p.readInt());
+        ssData.teleserviceType = ssData.TeleserviceTypeFromRILInt(p.readInt());
+        ssData.serviceClass = p.readInt(); // This is service class sent in the SS request.
+        ssData.result = p.readInt(); // This is the result of the SS request.
+        num = p.readInt();
+
+        if (ssData.serviceType.isTypeCF() &&
+            ssData.requestType.isTypeInterrogation()) {
+            ssData.cfInfo = new CallForwardInfo[num];
+
+            for (int i = 0; i < num; i++) {
+                ssData.cfInfo[i] = new CallForwardInfo();
+
+                ssData.cfInfo[i].status = p.readInt();
+                ssData.cfInfo[i].reason = p.readInt();
+                ssData.cfInfo[i].serviceClass = p.readInt();
+                ssData.cfInfo[i].toa = p.readInt();
+                ssData.cfInfo[i].number = p.readString();
+                ssData.cfInfo[i].timeSeconds = p.readInt();
+
+                riljLog("[SS Data] CF Info " + i + " : " +  ssData.cfInfo[i]);
+            }
+        } else {
+            ssData.ssInfo = new int[num];
+            for (int i = 0; i < num; i++) {
+                ssData.ssInfo[i] = p.readInt();
+                riljLog("[SS Data] SS Info " + i + " : " +  ssData.ssInfo[i]);
+            }
+        }
+
+        return ssData;
     }
 
 
@@ -3716,6 +4299,40 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         send(rr);
     }
 
+    public void setCdmaBroadcastConfig(CdmaSmsBroadcastConfigInfo[] configs, Message response) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_CDMA_SET_BROADCAST_CONFIG, response);
+
+        // Convert to 1 service category per config (the way RIL takes is)
+        ArrayList<CdmaSmsBroadcastConfigInfo> processedConfigs =
+            new ArrayList<CdmaSmsBroadcastConfigInfo>();
+        for (CdmaSmsBroadcastConfigInfo config : configs) {
+            for (int i = config.getFromServiceCategory(); i <= config.getToServiceCategory(); i++) {
+                processedConfigs.add(new CdmaSmsBroadcastConfigInfo(i,
+                        i,
+                        config.getLanguage(),
+                        config.isSelected()));
+            }
+        }
+
+        CdmaSmsBroadcastConfigInfo[] rilConfigs = processedConfigs.toArray(configs);
+        rr.mp.writeInt(rilConfigs.length);
+        for(int i = 0; i < rilConfigs.length; i++) {
+            rr.mp.writeInt(rilConfigs[i].getFromServiceCategory());
+            rr.mp.writeInt(rilConfigs[i].getLanguage());
+            rr.mp.writeInt(rilConfigs[i].isSelected() ? 1 : 0);
+        }
+
+        if (RILJ_LOGD) {
+            riljLog(rr.serialString() + "> " + requestToString(rr.mRequest)
+                    + " with " + rilConfigs.length + "configs : ");
+            for (int i = 0; i < rilConfigs.length; i++) {
+                riljLog(rilConfigs[i].toString());
+            }
+        }
+
+        send(rr);
+    }
+
     public void setCdmaBroadcastActivation(boolean activate, Message response) {
         RILRequest rr = RILRequest.obtain(RIL_REQUEST_CDMA_BROADCAST_ACTIVATION, response);
 
@@ -3744,6 +4361,18 @@ public final class RIL extends BaseCommands implements CommandsInterface {
         rr.mp.writeString(nonce);
 
         if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+
+        send(rr);
+    }
+
+    public void setTransmitPower(int powerLevel, Message result) {
+        RILRequest rr = RILRequest.obtain(RIL_REQUEST_SET_TRANSMIT_POWER, result);
+
+        rr.mp.writeInt(1);
+        rr.mp.writeInt(powerLevel);
+
+        if (RILJ_LOGD)
+            riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
 
         send(rr);
     }

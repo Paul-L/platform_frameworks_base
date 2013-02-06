@@ -16,6 +16,7 @@
 
 package com.android.internal.telephony;
 
+import android.content.Context;
 import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.Message;
@@ -32,9 +33,17 @@ public abstract class IccRecords extends Handler implements IccConstants {
 
     protected static final boolean DBG = true;
     // ***** Instance Variables
+    protected boolean mDestroyed = false; //set to true once this object is commanded to be disposed of.
+    protected Context mContext;
+    protected CommandsInterface mCi;
+    protected IccFileHandler mFh;
+    protected UiccCardApplication mParentApp;
 
-    protected PhoneBase phone;
     protected RegistrantList recordsLoadedRegistrants = new RegistrantList();
+    protected RegistrantList mImsiReadyRegistrants = new RegistrantList();
+    protected RegistrantList mRecordsEventsRegistrants = new RegistrantList();
+    protected RegistrantList mNewSmsRegistrants = new RegistrantList();
+    protected RegistrantList mNetworkSelectionModeAutomaticRegistrants = new RegistrantList();
 
     protected int recordsToLoad;  // number of pending load requests
 
@@ -52,7 +61,7 @@ public abstract class IccRecords extends Handler implements IccConstants {
     protected String newVoiceMailNum = null;
     protected String newVoiceMailTag = null;
     protected boolean isVoiceMailFixed = false;
-    protected int countVoiceMessages = 0;
+    protected String imsi;
 
     protected int mncLength = UNINITIALIZED;
     protected int mailboxIndex = 0; // 0 is no mailbox dailing number associated
@@ -71,6 +80,10 @@ public abstract class IccRecords extends Handler implements IccConstants {
 
     // ***** Event Constants
     protected static final int EVENT_SET_MSISDN_DONE = 30;
+    public static final int EVENT_MWI = 0;
+    public static final int EVENT_CFI = 1;
+    public static final int EVENT_SPN = 2;
+    public static final int EVENT_EONS = 3;
 
     public static final int EVENT_GET_ICC_RECORD_DONE = 100;
 
@@ -91,17 +104,25 @@ public abstract class IccRecords extends Handler implements IccConstants {
     }
 
     // ***** Constructor
-
-    public IccRecords(PhoneBase p) {
-        this.phone = p;
+    public IccRecords(UiccCardApplication app, Context c, CommandsInterface ci) {
+        mContext = c;
+        mCi = ci;
+        mFh = app.getIccFileHandler();
+        mParentApp = app;
     }
 
     /**
      * Call when the IccRecords object is no longer going to be used.
      */
-    public abstract void dispose();
+    public void dispose() {
+        mDestroyed = true;
+        mParentApp = null;
+        mFh = null;
+        mCi = null;
+        mContext = null;
+    }
 
-    protected abstract void onRadioOffOrNotAvailable();
+    public abstract void onReady();
 
     //***** Public Methods
     public AdnRecordCache getAdnCache() {
@@ -109,6 +130,10 @@ public abstract class IccRecords extends Handler implements IccConstants {
     }
 
     public void registerForRecordsLoaded(Handler h, int what, Object obj) {
+        if (mDestroyed) {
+            return;
+        }
+
         Registrant r = new Registrant(h, what, obj);
         recordsLoadedRegistrants.add(r);
 
@@ -116,9 +141,49 @@ public abstract class IccRecords extends Handler implements IccConstants {
             r.notifyRegistrant(new AsyncResult(null, null, null));
         }
     }
-
     public void unregisterForRecordsLoaded(Handler h) {
         recordsLoadedRegistrants.remove(h);
+    }
+
+    public void registerForImsiReady(Handler h, int what, Object obj) {
+        if (mDestroyed) {
+            return;
+        }
+
+        Registrant r = new Registrant(h, what, obj);
+        mImsiReadyRegistrants.add(r);
+
+        if (imsi != null) {
+            r.notifyRegistrant(new AsyncResult(null, null, null));
+        }
+    }
+    public void unregisterForImsiReady(Handler h) {
+        mImsiReadyRegistrants.remove(h);
+    }
+    
+    
+    public synchronized void registerForRecordsEvents(Handler h, int what, Object obj) {
+        Registrant r = new Registrant (h, what, obj);
+        mRecordsEventsRegistrants.add(r);
+    }
+    public synchronized void unregisterForRecordsEvents(Handler h) {
+        mRecordsEventsRegistrants.remove(h);
+    }
+
+    public synchronized void registerForNewSms(Handler h, int what, Object obj) {
+        Registrant r = new Registrant (h, what, obj);
+        mNewSmsRegistrants.add(r);
+    }
+    public synchronized void unregisterForNewSms(Handler h) {
+        mNewSmsRegistrants.remove(h);
+    }
+
+    public synchronized void registerForNetworkSelectionModeAutomatic(Handler h, int what, Object obj) {
+        Registrant r = new Registrant (h, what, obj);
+        mNetworkSelectionModeAutomaticRegistrants.add(r);
+    }
+    public synchronized void unregisterForNetworkSelectionModeAutomatic(Handler h) {
+        mNetworkSelectionModeAutomaticRegistrants.remove(h);
     }
 
     /**
@@ -130,6 +195,15 @@ public abstract class IccRecords extends Handler implements IccConstants {
      */
     public String getIMSI() {
         return null;
+    }
+
+    /**
+     * Imsi could be set by ServiceStateTrackers in case of cdma
+     * @param imsi
+     */
+    public void setImsi(String imsi) {
+        this.imsi = imsi;
+        mImsiReadyRegistrants.notifyRegistrants();
     }
 
     public String getMsisdnNumber() {
@@ -162,7 +236,7 @@ public abstract class IccRecords extends Handler implements IccConstants {
 
         AdnRecord adn = new AdnRecord(msisdnTag, msisdn);
 
-        new AdnRecordLoader(phone).updateEF(adn, EF_MSISDN, EF_EXT1, 1, null,
+        new AdnRecordLoader(mFh).updateEF(adn, EF_MSISDN, EF_EXT1, 1, null,
                 obtainMessage(EVENT_SET_MSISDN_DONE, onComplete));
     }
 
@@ -220,21 +294,14 @@ public abstract class IccRecords extends Handler implements IccConstants {
      *                     -1 to indicate that an unknown number of
      *                      messages are waiting
      */
-    public abstract void setVoiceMessageWaiting(int line, int countWaiting);
-
-    /** @return  true if there are messages waiting, false otherwise. */
-    public boolean getVoiceMessageWaiting() {
-        return countVoiceMessages != 0;
-    }
+    public abstract void setVoiceMessageWaiting(int line, int countWaiting, Message onComplete );
 
     /**
-     * Returns number of voice messages waiting, if available
-     * If not available (eg, on an older CPHS SIM) -1 is returned if
-     * getVoiceMessageWaiting() is true
+     * Returns number of voice messages waiting, if available If not available
+     * (eg, on an older CPHS SIM) -1 is returned if getVoiceMessageWaiting() is
+     * true
      */
-    public int getVoiceMessageCount() {
-        return countVoiceMessages;
-    }
+    public abstract int getVoiceMessageCount();
 
     /**
      * Called by STK Service when REFRESH is received.
@@ -315,6 +382,14 @@ public abstract class IccRecords extends Handler implements IccConstants {
     }
 
     /**
+     * Check if call forward info is stored on SIM
+     * @return true if call forward info is stored on SIM.
+     */
+    public boolean isCallForwardStatusStored() {
+        return false;
+    }
+
+    /**
      * Get the current Voice call forwarding flag for GSM/UMTS and the like SIMs
      *
      * @return true if enabled
@@ -330,6 +405,16 @@ public abstract class IccRecords extends Handler implements IccConstants {
      * @param enable
      */
     public void setVoiceCallForwardingFlag(int line, boolean enable) {
+    }
+
+    /**
+     * Set the voice call forwarding flag for GSM/UMTS and the like SIMs
+     *
+     * @param line to enable/disable
+     * @param enable
+     * @param number to which CFU is enabled
+     */
+    public void setVoiceCallForwardingFlag(int line, boolean enable, String number) {
     }
 
     /**

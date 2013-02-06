@@ -610,7 +610,6 @@ static void Surface_setSize(
     }
 }
 
-#ifdef QCOM_HARDWARE
 static void Surface_setStereoscopic3DFormat(JNIEnv* env, jobject clazz, jint f)
 {
     const sp<Surface>& surface(getSurface(env, clazz));
@@ -622,7 +621,6 @@ static void Surface_setStereoscopic3DFormat(JNIEnv* env, jobject clazz, jint f)
         doThrowIAE(env);
     }
 }
-#endif
 
 static void Surface_hide(
         JNIEnv* env, jobject clazz)

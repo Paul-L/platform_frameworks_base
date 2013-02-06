@@ -18,6 +18,7 @@
 // Proxy for media player implementations
 
 //#define LOG_NDEBUG 0
+#define LOG_NIDEBUG 0
 #define LOG_TAG "MediaPlayerService"
 #include <utils/Log.h>
 
@@ -56,6 +57,7 @@
 #include <media/stagefright/MediaErrors.h>
 
 #include <system/audio.h>
+#include <system/audio_policy.h>
 
 #include <private/android_filesystem_config.h>
 
@@ -580,7 +582,13 @@ player_type getPlayerType(const char* url)
     if (!strncasecmp("http://", url, 7)
             || !strncasecmp("https://", url, 8)) {
         size_t len = strlen(url);
-        if (len >= 5 && !strcasecmp(".m3u8", &url[len - 5])) {
+        if ((len >= 5 && !strcasecmp(".m3u8", &url[len - 5]))||
+            (len >= 4 && !strcasecmp(".m3u", &url[len - 4])))
+        {
+            return NU_PLAYER;
+        }
+        else if(len >= 4 && !strcasecmp(".mpd", &url[len - 4])) {
+            LOGV("NuPlayer is getting created");
             return NU_PLAYER;
         }
 
@@ -1262,6 +1270,7 @@ MediaPlayerService::AudioOutput::AudioOutput(int sessionId)
       mSessionId(sessionId) {
     LOGV("AudioOutput(%d)", sessionId);
     mTrack = 0;
+    mSession = 0;
     mStreamType = AUDIO_STREAM_MUSIC;
     mLeftVolume = 1.0;
     mRightVolume = 1.0;
@@ -1274,6 +1283,7 @@ MediaPlayerService::AudioOutput::AudioOutput(int sessionId)
 MediaPlayerService::AudioOutput::~AudioOutput()
 {
     close();
+    closeSession();
 }
 
 void MediaPlayerService::AudioOutput::setMinBufferCount()
@@ -1337,6 +1347,39 @@ status_t MediaPlayerService::AudioOutput::getPosition(uint32_t *position)
     if (mTrack == 0) return NO_INIT;
     return mTrack->getPosition(position);
 }
+
+status_t MediaPlayerService::AudioOutput::openSession(
+        int format, int lpaSessionId, uint32_t sampleRate, int channels)
+{
+    uint32_t flags = 0;
+    mCallback = NULL;
+    mCallbackCookie = NULL;
+    if (mSession) closeSession();
+    mSession = NULL;
+
+    flags |= AUDIO_POLICY_OUTPUT_FLAG_DIRECT;
+
+    AudioTrack *t = new AudioTrack(
+                mStreamType,
+                sampleRate,
+                format,
+                channels,
+                flags,
+                mSessionId,
+                lpaSessionId);
+    LOGV("openSession: AudioTrack created successfully track(%p)",t);
+    if ((t == 0) || (t->initCheck() != NO_ERROR)) {
+        LOGE("Unable to create audio track");
+        delete t;
+        return NO_INIT;
+    }
+    LOGV("openSession: Out");
+    mSession = t;
+    LOGV("setVolume");
+    t->setVolume(mLeftVolume, mRightVolume);
+    return NO_ERROR;
+}
+
 
 status_t MediaPlayerService::AudioOutput::open(
         uint32_t sampleRate, int channelCount, int format, int bufferCount,
@@ -1454,17 +1497,47 @@ void MediaPlayerService::AudioOutput::pause()
 void MediaPlayerService::AudioOutput::close()
 {
     LOGV("close");
-    delete mTrack;
-    mTrack = 0;
+    if(mTrack != NULL) {
+        delete mTrack;
+        mTrack = 0;
+    }
+}
+
+void MediaPlayerService::AudioOutput::closeSession()
+{
+    LOGV("closeSession");
+    if(mSession != NULL) {
+        delete mSession;
+        mSession = 0;
+    }
+}
+
+void MediaPlayerService::AudioOutput::pauseSession()
+{
+    LOGV("pauseSession");
+    if(mSession != NULL) {
+        mSession->pause();
+    }
+}
+
+void MediaPlayerService::AudioOutput::resumeSession()
+{
+    LOGV("resumeSession");
+    if(mSession != NULL) {
+        mSession->start();
+    }
 }
 
 void MediaPlayerService::AudioOutput::setVolume(float left, float right)
 {
-    LOGV("setVolume(%f, %f)", left, right);
+    LOGV("setVolume(%f, %f): %p", left, right, mSession);
+
     mLeftVolume = left;
     mRightVolume = right;
     if (mTrack) {
         mTrack->setVolume(left, right);
+    } else if(mSession) {
+        mSession->setVolume(left, right);
     }
 }
 

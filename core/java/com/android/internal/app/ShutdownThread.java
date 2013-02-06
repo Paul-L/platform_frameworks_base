@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 The Android Open Source Project
+ * Copyright (C) 2011-2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,10 +40,18 @@ import android.os.SystemProperties;
 import android.os.Vibrator;
 import android.os.storage.IMountService;
 import android.os.storage.IMountShutdownObserver;
+import android.telephony.TelephonyManager;
+import android.telephony.MSimTelephonyManager;
 
 import com.android.internal.telephony.ITelephony;
+import com.android.internal.telephony.ITelephonyMSim;
 import android.util.Log;
 import android.view.WindowManager;
+
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.io.OutputStreamWriter;
 
 public final class ShutdownThread extends Thread {
     // constants
@@ -65,6 +74,10 @@ public final class ShutdownThread extends Thread {
 
     // Provides shutdown assurance in case the system_server is killed
     public static final String SHUTDOWN_ACTION_PROPERTY = "sys.shutdown.requested";
+    public static final String RADIO_SHUTDOWN_PROPERTY = "sys.radio.shutdown";
+
+    private static final String SYSFS_MSM_EFS_SYNC_COMPLETE = "/sys/devices/platform/rs300000a7.65536/sync_sts";
+    private static final String SYSFS_MDM_EFS_SYNC_COMPLETE = "/sys/devices/platform/rs300100a7.65536/sync_sts";
 
     // static instance of this thread
     private static final ShutdownThread sInstance = new ShutdownThread();
@@ -232,6 +245,7 @@ public final class ShutdownThread extends Thread {
     public void run() {
         boolean bluetoothOff;
         boolean radioOff;
+        boolean msmEfsSyncDone = false, mdmEfsSyncDone = false;
 
         BroadcastReceiver br = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
@@ -306,14 +320,71 @@ public final class ShutdownThread extends Thread {
         }
 
         try {
-            radioOff = phone == null || !phone.isRadioOn();
-            if (!radioOff) {
-                Log.w(TAG, "Turning off radio...");
-                phone.setRadio(false);
+            radioOff = true;
+            if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+                final ITelephonyMSim mphone = ITelephonyMSim.Stub.asInterface(
+                        ServiceManager.checkService("phone_msim"));
+                if (mphone != null) {
+                    //radio off indication should be sent for both subscriptions in case of DSDS.
+                    for (int i = 0; i < MSimTelephonyManager.getDefault().getPhoneCount(); i++) {
+                        radioOff = radioOff && !mphone.isRadioOn(i);
+                        if (mphone.isRadioOn(i)) {
+                            Log.w(TAG, "Turning off radio on Subscription :" + i);
+                            mphone.setRadio(false, i);
+                        }
+                    }
+                }
+            } else {
+                radioOff = phone == null || !phone.isRadioOn();
+                if (!radioOff) {
+                    Log.w(TAG, "Turning off radio...");
+                    phone.setRadio(false);
+                }
             }
         } catch (RemoteException ex) {
             Log.e(TAG, "RemoteException during radio shutdown", ex);
             radioOff = true;
+        }
+
+        SystemProperties.set(RADIO_SHUTDOWN_PROPERTY, "true");
+        Log.i(TAG, "Waiting for radio file system sync to complete ...");
+
+        // Wait a max of 8 seconds
+        for (int i = 0; i < MAX_NUM_PHONE_STATE_READS; i++) {
+            if (!msmEfsSyncDone) {
+                try {
+                    FileInputStream fis = new FileInputStream(SYSFS_MSM_EFS_SYNC_COMPLETE);
+                    int result = fis.read();
+                    fis.close();
+                    if (result == '1')
+                                        {
+                        msmEfsSyncDone = true;
+                                        }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Exception during msmEfsSyncDone", ex);
+                    msmEfsSyncDone = true;
+                }
+            }
+            if (!mdmEfsSyncDone) {
+                try {
+                    FileInputStream fis = new FileInputStream(SYSFS_MDM_EFS_SYNC_COMPLETE);
+                    int result = fis.read();
+                    fis.close();
+                    if (result == '1')
+                                        {
+                        mdmEfsSyncDone = true;
+                                        }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Exception during mdmEfsSyncDone", ex);
+                    mdmEfsSyncDone = true;
+                }
+            }
+            if (msmEfsSyncDone && mdmEfsSyncDone) {
+                Log.i(TAG, "Radio file system sync complete.");
+                break;
+            }
+            Log.i(TAG, "Radio file system sync incomplete - retry.");
+            SystemClock.sleep(PHONE_STATE_POLL_SLEEP_MSEC);
         }
 
         Log.i(TAG, "Waiting for Bluetooth and Radio...");
@@ -331,7 +402,16 @@ public final class ShutdownThread extends Thread {
             }
             if (!radioOff) {
                 try {
-                    radioOff = !phone.isRadioOn();
+                    if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+                        radioOff = true;
+                        final ITelephonyMSim mphone = ITelephonyMSim.Stub.asInterface(
+                                ServiceManager.checkService("phone_msim"));
+                        for (int j = 0; j < TelephonyManager.getDefault().getPhoneCount(); j++) {
+                            radioOff = radioOff && !mphone.isRadioOn(j);
+                        }
+                    } else {
+                        radioOff = !phone.isRadioOn();
+                    }
                 } catch (RemoteException ex) {
                     Log.e(TAG, "RemoteException during radio shutdown", ex);
                     radioOff = true;

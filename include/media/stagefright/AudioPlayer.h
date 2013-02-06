@@ -87,16 +87,14 @@ private:
     int64_t mSeekTimeUs;
 
     bool mStarted;
-#ifdef QCOM_HARDWARE
     bool mSourcePaused;
-#endif
+
     bool mIsFirstBuffer;
     status_t mFirstBufferResult;
     MediaBuffer *mFirstBuffer;
-
     sp<MediaPlayerBase::AudioSink> mAudioSink;
     AwesomePlayer *mObserver;
-
+    const char *mComponentName;
     static void AudioCallback(int event, void *user, void *info);
     void AudioCallback(int event, void *info);
 

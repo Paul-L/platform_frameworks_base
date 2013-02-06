@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +17,8 @@
 
 package com.android.internal.telephony.sip;
 
+import java.util.ArrayList;
+
 import android.content.Context;
 import android.os.Handler;
 import android.os.Message;
@@ -23,6 +26,7 @@ import android.os.Message;
 import com.android.internal.telephony.BaseCommands;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.UUSInfo;
+import com.android.internal.telephony.cdma.CdmaSmsBroadcastConfigInfo;
 import com.android.internal.telephony.gsm.SmsBroadcastConfigInfo;
 
 /**
@@ -62,7 +66,7 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
             String newPwd, Message result) {
     }
 
-    public void supplyNetworkDepersonalization(String netpin, Message result) {
+    public void supplyDepersonalization(String netpin, int type,  Message result) {
     }
 
     public void getCurrentCalls(Message result) {
@@ -82,6 +86,9 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     }
 
     public void getIMSI(Message result) {
+    }
+
+    public void getIMSIForApp(String aid, Message result) {
     }
 
     public void getIMEI(Message result) {
@@ -172,6 +179,14 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     public void sendCdmaSms(byte[] pdu, Message result) {
     }
 
+    public void sendImsGsmSms (String smscPDU, String pdu,
+            int retry, int messageRef, Message response) {
+    }
+
+    public void sendImsCdmaSms(byte[] pdu, int retry, int messageRef,
+            Message response) {
+    }
+
     public void deleteSmsOnSim(int index, Message response) {
     }
 
@@ -187,6 +202,24 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     public void setupDataCall(String radioTechnology, String profile,
             String apn, String user, String password, String authType,
             String protocol, Message result) {
+    }
+
+    public void setupQosReq (int callId, ArrayList<String> qosFlows, Message result) {
+    }
+
+    public void releaseQos (int qosId, Message result) {
+    }
+
+    public void modifyQos (int qosId, ArrayList<String> qosFlows, Message result) {
+    }
+
+    public void suspendQos (int qosId, Message result) {
+    }
+
+    public void resumeQos (int qosId, Message result) {
+    }
+
+    public void getQosStatus (int qosId, Message result) {
     }
 
     public void deactivateDataCall(int cid, int reason, Message result) {
@@ -212,6 +245,9 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
 
     public void iccIO (int command, int fileid, String path, int p1, int p2,
             int p3, String data, String pin2, Message result) {
+    }
+    public void iccIOForApp (int command, int fileid, String path, int p1, int p2,
+            int p3, String data, String pin2, String aid, Message result) {
     }
 
     public void getCLIR(Message result) {
@@ -364,6 +400,9 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     public void setCdmaSubscriptionSource(int cdmaSubscription , Message response) {
     }
 
+    public void getImsRegistrationState (Message result) {
+    }
+
     public void queryTTYMode(Message response) {
     }
 
@@ -411,5 +450,27 @@ class SipCommandInterface extends BaseCommands implements CommandsInterface {
     }
 
     public void requestIsimAuthentication(String nonce, Message response) {
+    }
+
+    public void getVoiceRadioTechnology(Message result) {
+    }
+
+    public void setCdmaBroadcastConfig(CdmaSmsBroadcastConfigInfo[] configs, Message response) {
+    }
+
+    public void setTransmitPower(int powerLevel, Message result) {
+    }
+
+    public void getDataCallProfile(int appType, Message result) {
+    }
+
+    public void setSubscriptionMode(int subscriptionMode, Message response) {
+    }
+
+    public void setUiccSubscription(int slotId, int appIndex, int subId, int subStatus,
+            Message response) {
+    }
+
+    public void setDataSubscription(Message response) {
     }
 }

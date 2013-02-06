@@ -78,12 +78,8 @@ public:
             const sp<DataSource> &source, String8 *mimeType,
             float *confidence, sp<AMessage> *meta);
 
-#ifdef QCOM_HARDWARE
     //isExtendedExtractor if true, will store the location of the sniffer to register
     static void RegisterSniffer(SnifferFunc func, bool isExtendedExtractor = false);
-#else
-    static void RegisterSniffer(SnifferFunc func);
-#endif
     static void RegisterDefaultSniffers();
 
     // for DRM
@@ -106,9 +102,7 @@ private:
     static Mutex gSnifferMutex;
     static List<SnifferFunc> gSniffers;
 
-#ifdef QCOM_HARDWARE
     static List<SnifferFunc>::iterator extendedSnifferPosition;
-#endif
 
     DataSource(const DataSource &);
     DataSource &operator=(const DataSource &);

@@ -24,6 +24,7 @@
 #include <media/stagefright/MediaErrors.h>
 #include <utils/RefBase.h>
 #include <utils/threads.h>
+#include <utils/List.h>
 
 namespace android {
 
@@ -65,8 +66,9 @@ public:
             uint32_t sampleIndex,
             off64_t *offset,
             size_t *size,
-            uint32_t *compositionTime,
-            bool *isSyncSample = NULL);
+            uint64_t *compositionTime,
+            bool *isSyncSample = NULL,
+            uint32_t *sampleDescIndex = NULL);
 
     enum {
         kFlagBefore,
@@ -74,7 +76,7 @@ public:
         kFlagClosest
     };
     status_t findSampleAtTime(
-            uint32_t req_time, uint32_t *sample_index, uint32_t flags);
+            uint64_t req_time, uint32_t *sample_index, uint32_t flags);
 
     status_t findSyncSampleNear(
             uint32_t start_sample_index, uint32_t *sample_index,
@@ -82,6 +84,11 @@ public:
 
     status_t findThumbnailSample(uint32_t *sample_index);
     uint32_t getNumSyncSamples();
+
+    status_t setSampleDescParams(uint32_t entry_count, off64_t data_offset, size_t data_size);
+    status_t getSampleDescAtIndex(uint32_t index, uint8_t **ptr, uint32_t *size);
+    status_t getMaxAvccAtomSize(uint32_t *size);
+
 protected:
     ~SampleTable();
 
@@ -113,7 +120,7 @@ private:
 
     struct SampleTimeEntry {
         uint32_t mSampleIndex;
-        uint32_t mCompositionTime;
+        uint64_t mCompositionTime;
     };
     SampleTimeEntry *mSampleTimeEntries;
 
@@ -143,6 +150,12 @@ private:
     static int CompareIncreasingTime(const void *, const void *);
 
     void buildSampleEntriesTable();
+
+    struct SampleDescAtom {
+        uint8_t *ptr;
+        uint32_t size;
+    };
+    List<SampleDescAtom *> mSampleDescAtoms;
 
     SampleTable(const SampleTable &);
     SampleTable &operator=(const SampleTable &);

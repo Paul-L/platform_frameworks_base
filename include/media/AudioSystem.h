@@ -93,6 +93,7 @@ public:
         size_t* buffSize);
 
     static status_t setVoiceVolume(float volume);
+    static status_t setFmVolume(float volume);
 
     // return the number of audio frames written by AudioFlinger to audio HAL and
     // audio dsp to DAC since the output on which the specified stream is playing
@@ -120,10 +121,8 @@ public:
         INPUT_CLOSED,
         INPUT_CONFIG_CHANGED,
         STREAM_CONFIG_CHANGED,
-#ifdef WITH_QCOM_LPA
         A2DP_OUTPUT_STATE,
         EFFECT_CONFIG_CHANGED,
-#endif
         NUM_CONFIG_EVENTS
     };
 
@@ -155,7 +154,6 @@ public:
                                         uint32_t format = AUDIO_FORMAT_DEFAULT,
                                         uint32_t channels = AUDIO_CHANNEL_OUT_STEREO,
                                         audio_policy_output_flags_t flags = AUDIO_POLICY_OUTPUT_FLAG_INDIRECT);
-#ifdef WITH_QCOM_LPA
     static audio_io_handle_t getSession(audio_stream_type_t stream,
                                         uint32_t format = AUDIO_FORMAT_DEFAULT,
                                         audio_policy_output_flags_t flags = AUDIO_POLICY_OUTPUT_FLAG_DIRECT,
@@ -163,7 +161,6 @@ public:
     static void closeSession(audio_io_handle_t output);
     static status_t pauseSession(audio_io_handle_t output, audio_stream_type_t stream);
     static status_t resumeSession(audio_io_handle_t output, audio_stream_type_t stream);
-#endif
     static status_t startOutput(audio_io_handle_t output,
                                 audio_stream_type_t stream,
                                 int session = 0);
@@ -176,12 +173,7 @@ public:
                                     uint32_t format = AUDIO_FORMAT_DEFAULT,
                                     uint32_t channels = AUDIO_CHANNEL_IN_MONO,
                                     audio_in_acoustics_t acoustics = (audio_in_acoustics_t)0,
-#ifdef STE_AUDIO
-                                    int sessionId = 0,
-                                    audio_input_clients *inputClientId = NULL);
-#else
                                     int sessionId = 0);
-#endif
     static status_t startInput(audio_io_handle_t input);
     static status_t stopInput(audio_io_handle_t input);
     static void releaseInput(audio_io_handle_t input);

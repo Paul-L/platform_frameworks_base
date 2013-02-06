@@ -32,10 +32,8 @@
 #include <utils/Log.h>
 #include <utils/String8.h>
 
-#ifdef QCOM_HARDWARE
 #include <cutils/properties.h>
 #include <gralloc_priv.h>
-#endif
 
 namespace android {
 
@@ -58,6 +56,27 @@ SurfaceMediaSource::SurfaceMediaSource(uint32_t bufW, uint32_t bufH) :
     LOGV("SurfaceMediaSource::SurfaceMediaSource");
     sp<ISurfaceComposer> composer(ComposerService::getComposerService());
     mGraphicBufferAlloc = composer->createGraphicBufferAlloc();
+
+    mUsageQuirks = 0;
+    char value[PROPERTY_VALUE_MAX] = {0};
+    if (property_get("ro.product.device", value, "0")) {
+        if (!strncmp(value, "msm8660", sizeof("msm8660") - 1)) {
+            #ifdef USE_ION
+                mUsageQuirks = (GRALLOC_USAGE_PRIVATE_MM_HEAP |
+                                 GRALLOC_USAGE_PRIVATE_UNCACHED);
+            #else
+                mUsageQuirks = (GRALLOC_USAGE_PRIVATE_SMI_HEAP |
+                                 GRALLOC_USAGE_PRIVATE_UNCACHED);
+            #endif
+        }
+        else if ((!strncmp(value, "msm8960", sizeof("msm8960") - 1)) ||
+            (!strncmp(value, "msm7630", sizeof("msm7630") - 1)) ||
+            (!strncmp(value, "msm7627", sizeof("msm7627") - 1)))
+        {
+            mUsageQuirks = (GRALLOC_USAGE_PRIVATE_MM_HEAP |
+                            GRALLOC_USAGE_PRIVATE_UNCACHED);
+        }
+    }
 }
 
 SurfaceMediaSource::~SurfaceMediaSource() {
@@ -343,23 +362,8 @@ status_t SurfaceMediaSource::dequeueBuffer(int *outBuf, uint32_t w, uint32_t h,
         ((uint32_t(buffer->usage) & usage) != usage)) {
             // XXX: This will be changed to USAGE_HW_VIDEO_ENCODER once driver
             // issues with that flag get fixed.
+            usage |= mUsageQuirks;
             usage |= GraphicBuffer::USAGE_HW_TEXTURE;
-#ifdef QCOM_HARDWARE
-            char value[PROPERTY_VALUE_MAX] = {0};
-            if (property_get("ro.board.platform", value, "0")) {
-#ifndef CAMERA_MM_HEAP
-                if (!strncmp(value, "msm8660", sizeof("msm8660") - 1)) {
-                    usage |= (GRALLOC_USAGE_PRIVATE_SMI_HEAP |
-                            GRALLOC_USAGE_PRIVATE_UNCACHED);
-                }
-                else
-#endif
-                {
-                    usage |= (GRALLOC_USAGE_PRIVATE_MM_HEAP |
-                            GRALLOC_USAGE_PRIVATE_UNCACHED);
-                }
-            }
-#endif
             status_t error;
             sp<GraphicBuffer> graphicBuffer(
                     mGraphicBufferAlloc->createGraphicBuffer(

@@ -55,6 +55,9 @@ import com.google.android.collect.Lists;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.net.InetAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.net.Inet4Address;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -74,7 +77,7 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
     private Context mContext;
     private final static String TAG = "Tethering";
     private final static boolean DBG = true;
-    private final static boolean VDBG = false;
+    private final static boolean VDBG = true;
 
     // TODO - remove both of these - should be part of interface inspection/selection stuff
     private String[] mTetherableUsbRegexs;
@@ -367,6 +370,28 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
         }
     }
 
+    private LinkAddress[] getSubnetFromIface(String ifaceName)
+            throws SocketException {
+        ArrayList<LinkAddress> result = Lists.newArrayList();
+        NetworkInterface internalNetworkInterface =
+                NetworkInterface.getByName(ifaceName);
+        if (internalNetworkInterface == null) {
+            // do nothing here
+            if (DBG)
+                Log.d(TAG, "internalNetworkInterface is null");
+        } else {
+            Collection<InterfaceAddress> interfaceAddresses =
+                    internalNetworkInterface.getInterfaceAddresses();
+            for (InterfaceAddress ia : interfaceAddresses) {
+                InetAddress addr = NetworkUtils.getNetworkPart(ia.getAddress(),
+                        ia.getNetworkPrefixLength());
+                result.add(new LinkAddress(addr, ia.getNetworkPrefixLength()));
+            }
+        }
+
+        return result.toArray(new LinkAddress[result.size()]);
+    }
+
     // TODO - move all private methods used only by the state machine into the state machine
     // to clarify what needs synchronized protection.
     private void sendTetherStateChangedBroadcast() {
@@ -501,7 +526,9 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                 }
             } else if (action.equals(ConnectivityManager.CONNECTIVITY_ACTION)) {
                 if (VDBG) Log.d(TAG, "Tethering got CONNECTIVITY_ACTION");
-                mTetherMasterSM.sendMessage(TetherMasterSM.CMD_UPSTREAM_CHANGED);
+                NetworkInfo info = (NetworkInfo)
+                        intent.getParcelableExtra(ConnectivityManager.EXTRA_NETWORK_INFO);
+                mTetherMasterSM.sendMessage(TetherMasterSM.CMD_UPSTREAM_CHANGED, info);
             }
         }
     }
@@ -726,8 +753,8 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
     //      CONNECTIVITY_ACTION. Only to accomodate interface
     //      switch during HO.
     //      @see bug/4455071
-    public void handleTetherIfaceChange() {
-        mTetherMasterSM.sendMessage(TetherMasterSM.CMD_UPSTREAM_CHANGED);
+    public void handleTetherIfaceChange(NetworkInfo info) {
+        mTetherMasterSM.sendMessage(TetherMasterSM.CMD_UPSTREAM_CHANGED, info);
     }
 
     class TetherInterfaceSM extends StateMachine {
@@ -772,6 +799,8 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
         String mMyUpstreamIfaceName;  // may change over time
 
         boolean mUsb;
+
+        LinkAddress[] mLinkAddrs;
 
         TetherInterfaceSM(String name, Looper looper, boolean usb) {
             super(name, looper);
@@ -974,7 +1003,7 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                         if (VDBG) Log.e(TAG, "Exception in forceUpdate: " + e.toString());
                     }
                     try {
-                        mNMService.disableNat(mIfaceName, mMyUpstreamIfaceName);
+                        mNMService.disableNatBySubnet(mIfaceName, mMyUpstreamIfaceName, mLinkAddrs);
                     } catch (Exception e) {
                         if (VDBG) Log.e(TAG, "Exception in disableNat: " + e.toString());
                     }
@@ -1025,12 +1054,17 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                         cleanupUpstream();
                         if (newUpstreamIfaceName != null) {
                             try {
-                                mNMService.enableNat(mIfaceName, newUpstreamIfaceName);
+                                mLinkAddrs = getSubnetFromIface(mIfaceName);
+                                mNMService.enableNatBySubnet(mIfaceName, newUpstreamIfaceName,
+                                        mLinkAddrs);
                             } catch (Exception e) {
                                 Log.e(TAG, "Exception enabling Nat: " + e.toString());
+                                mLinkAddrs = null;
                                 try {
                                     mNMService.untetherInterface(mIfaceName);
-                                } catch (Exception ee) {}
+                                } catch (Exception ee) {
+                                    Log.e(TAG, "Exception untetherInterface: ", ee);
+                                }
 
                                 setLastError(ConnectivityManager.TETHER_ERROR_ENABLE_NAT_ERROR);
                                 transitionTo(mInitialState);
@@ -1270,7 +1304,54 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                 return true;
             }
 
+            protected void addUpstreamV6Interface(String iface) {
+                IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
+                INetworkManagementService service = INetworkManagementService.Stub.asInterface(b);
+
+                Log.d(TAG, "adding v6 interface " + iface);
+                try {
+                    service.addUpstreamV6Interface(iface);
+                } catch (Exception e) {
+                    Log.e(TAG, "Unable to append v6 upstream interface", e);
+                }
+            }
+
+            protected void removeUpstreamV6Interface(String iface) {
+                IBinder b = ServiceManager.getService(Context.NETWORKMANAGEMENT_SERVICE);
+                INetworkManagementService service = INetworkManagementService.Stub.asInterface(b);
+
+                Log.d(TAG, "removing v6 interface " + iface);
+                try {
+                    service.removeUpstreamV6Interface(iface);
+                } catch (Exception e) {
+                    Log.e(TAG, "Unable to remove v6 upstream interface", e);
+                }
+            }
+
+
+            boolean isIpv6Connected(IConnectivityManager cm, LinkProperties linkProps) {
+                boolean ret = false;
+                Collection <InetAddress> addresses = null;
+
+                if (cm == null || linkProps == null) {
+                    return false;
+                }
+                addresses = linkProps.getAddresses();
+                for (InetAddress addr: addresses) {
+                    if (addr instanceof java.net.Inet6Address) {
+                        java.net.Inet6Address i6addr = (java.net.Inet6Address) addr;
+                        if (!i6addr.isAnyLocalAddress() && !i6addr.isLinkLocalAddress() &&
+                                !i6addr.isLoopbackAddress() && !i6addr.isMulticastAddress()) {
+                            ret = true;
+                            break;
+                        }
+                    }
+                }
+                return ret;
+            }
             protected void chooseUpstreamType(boolean tryCell) {
+                IBinder b = ServiceManager.getService(Context.CONNECTIVITY_SERVICE);
+                IConnectivityManager cm = IConnectivityManager.Stub.asInterface(b);
                 int upType = ConnectivityManager.TYPE_NONE;
                 String iface = null;
 
@@ -1284,13 +1365,28 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                         }
                     }
 
+
+                    if (VDBG) {
+                        Log.d(TAG, "chooseUpstreamType has upstream iface types:");
+                        for (Integer netType : mUpstreamIfaceTypes) {
+                            Log.d(TAG, " " + netType);
+                        }
+                    }
+
                     for (Integer netType : mUpstreamIfaceTypes) {
                         NetworkInfo info = null;
+                        LinkProperties props = null;
+                        boolean isV6Connected = false;
                         try {
-                            info = mConnService.getNetworkInfo(netType.intValue());
+                            info = cm.getNetworkInfo(netType.intValue());
+                            props = cm.getLinkProperties(info.getType());
+                            isV6Connected = isIpv6Connected(cm, props);
                         } catch (RemoteException e) { }
                         if ((info != null) && info.isConnected()) {
                             upType = netType.intValue();
+                            if (isV6Connected) {
+                                addUpstreamV6Interface(props.getInterfaceName());
+                            }
                             break;
                         }
                     }
@@ -1430,8 +1526,19 @@ public class Tethering extends INetworkManagementEventObserver.Stub {
                         break;
                     case CMD_UPSTREAM_CHANGED:
                         // need to try DUN immediately if Wifi goes down
+                        NetworkInfo info = (NetworkInfo) message.obj;
                         mTryCell = !WAIT_FOR_NETWORK_TO_SETTLE;
                         chooseUpstreamType(mTryCell);
+                        if (!info.isConnected()) {
+                            IBinder b = ServiceManager.getService(Context.CONNECTIVITY_SERVICE);
+                            IConnectivityManager cm = IConnectivityManager.Stub.asInterface(b);
+                            try {
+                                LinkProperties props = cm.getLinkProperties(info.getType());
+                                removeUpstreamV6Interface(props.getInterfaceName());
+                            } catch(Exception e) {
+                                Log.e(TAG, "Exception querying ConnectivityManager", e);
+                            }
+                        }
                         mTryCell = !mTryCell;
                         break;
                     case CMD_CELL_CONNECTION_RENEW:

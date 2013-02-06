@@ -64,13 +64,22 @@ static jlong readNumber(char const* filename) {
 }
 
 static const char* mobile_iface_list[] = {
-#ifdef MOBILE_IFACE_NAME
-    MOBILE_IFACE_NAME,
-#endif
     "rmnet0",
     "rmnet1",
     "rmnet2",
     "rmnet3",
+    "rmnet4",
+    "rmnet5",
+    "rmnet6",
+    "rmnet7",
+    "rmnet_sdio0",
+    "rmnet_sdio1",
+    "rmnet_sdio2",
+    "rmnet_sdio3",
+    "rmnet_sdio4",
+    "rmnet_sdio5",
+    "rmnet_sdio6",
+    "rmnet_sdio7",
     "cdma_rmnet4",
     "ppp0",
     0

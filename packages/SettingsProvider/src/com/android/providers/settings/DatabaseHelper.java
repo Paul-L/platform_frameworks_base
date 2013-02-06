@@ -34,6 +34,7 @@ import android.os.SystemProperties;
 import android.provider.Settings;
 import android.provider.Settings.Secure;
 import android.text.TextUtils;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import com.android.internal.content.PackageHelper;
@@ -1250,6 +1251,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     
             loadSetting(stmt, Settings.System.VOLUME_MUSIC,
                     AudioManager.DEFAULT_STREAM_VOLUME[AudioManager.STREAM_MUSIC]);
+            loadSetting(stmt, Settings.System.VOLUME_FM,
+                    AudioManager.DEFAULT_STREAM_VOLUME[AudioManager.STREAM_FM]);
             loadSetting(stmt, Settings.System.VOLUME_RING,
                     AudioManager.DEFAULT_STREAM_VOLUME[AudioManager.STREAM_RING]);
             loadSetting(stmt, Settings.System.VOLUME_SYSTEM,
@@ -1336,6 +1339,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     
             loadBooleanSetting(stmt, Settings.System.DIM_SCREEN,
                     R.bool.def_dim_screen);
+            loadSetting(stmt, Settings.System.AUTO_ANSWER_TIMEOUT, -1);
             loadSetting(stmt, Settings.System.STAY_ON_WHILE_PLUGGED_IN,
                     "1".equals(SystemProperties.get("ro.kernel.qemu")) ? 1 : 0);
             loadIntegerSetting(stmt, Settings.System.SCREEN_OFF_TIMEOUT,
@@ -1494,15 +1498,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 type = SystemProperties.getInt("ro.telephony.default_network",
                         RILConstants.PREFERRED_NETWORK_MODE);
             }
-            loadSetting(stmt, Settings.Secure.PREFERRED_NETWORK_MODE, type);
+            String val = Integer.toString(type);
+            if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+                val = type + "," + type;
+            }
+            loadSetting(stmt, Settings.Secure.PREFERRED_NETWORK_MODE, val);
     
             // Enable or disable Cell Broadcast SMS
             loadSetting(stmt, Settings.Secure.CDMA_CELL_BROADCAST_SMS,
                     RILConstants.CDMA_CELL_BROADCAST_SMS_DISABLED);
-    
-            // Set the preferred cdma subscription to 0 = Subscription from RUIM, when available
-            loadSetting(stmt, Settings.Secure.PREFERRED_CDMA_SUBSCRIPTION,
-                    RILConstants.PREFERRED_CDMA_SUBSCRIPTION);
     
             // Don't do this.  The SystemServer will initialize ADB_ENABLED from a
             // persistent system property instead.

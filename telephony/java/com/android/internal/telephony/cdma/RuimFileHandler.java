@@ -19,15 +19,9 @@ package com.android.internal.telephony.cdma;
 import android.os.*;
 import android.util.Log;
 
-import com.android.internal.telephony.IccConstants;
-import com.android.internal.telephony.IccException;
+import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.IccFileHandler;
-import com.android.internal.telephony.IccFileTypeMismatch;
-import com.android.internal.telephony.IccIoResult;
-import com.android.internal.telephony.IccUtils;
-import com.android.internal.telephony.PhoneProxy;
-
-import java.util.ArrayList;
+import com.android.internal.telephony.UiccCardApplication;
 
 /**
  * {@hide}
@@ -38,11 +32,8 @@ public final class RuimFileHandler extends IccFileHandler {
     //***** Instance Variables
 
     //***** Constructor
-    RuimFileHandler(CDMAPhone phone) {
-        super(phone);
-    }
-
-    public void dispose() {
+    public RuimFileHandler(UiccCardApplication app, String aid, CommandsInterface ci) {
+        super(app, aid, ci);
     }
 
     protected void finalize() {
@@ -57,8 +48,9 @@ public final class RuimFileHandler extends IccFileHandler {
         Message response = obtainMessage(EVENT_READ_ICON_DONE, fileid, 0,
                 onLoaded);
 
-        phone.mCM.iccIO(COMMAND_GET_RESPONSE, fileid, "img", 0, 0,
-                GET_RESPONSE_EF_IMG_SIZE_BYTES, null, null, response);
+        mCi.iccIOForApp(COMMAND_GET_RESPONSE, fileid, getEFPath(fileid), 0, 0,
+                GET_RESPONSE_EF_IMG_SIZE_BYTES, null, null,
+                mAid, response);
     }
 
     @Override
@@ -68,11 +60,26 @@ public final class RuimFileHandler extends IccFileHandler {
     }
 
     protected String getEFPath(int efid) {
+        // Both EF_ADN and EF_CSIM_LI are referring to same constant value 0x6F3A.
+        // So cannot derive different paths for them using exisitng logic
+        // hence added work around to derive path for EF_ADN.
+        if (efid == EF_ADN) {
+            return MF_SIM + DF_TELECOM;
+        }
+
         switch(efid) {
         case EF_SMS:
         case EF_CST:
         case EF_RUIM_SPN:
+        case EF_CSIM_LI:
+        case EF_CSIM_MDN:
+        case EF_CSIM_IMSIM:
+        case EF_CSIM_CDMAHOME:
+        case EF_CSIM_EPRL:
             return MF_SIM + DF_CDMA;
+        case EF_FDN:
+        case EF_MSISDN:
+            return MF_SIM + DF_TELECOM;
         }
         return getCommonIccEFPath(efid);
     }

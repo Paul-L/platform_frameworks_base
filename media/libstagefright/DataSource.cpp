@@ -27,11 +27,7 @@
 #include "include/DRMExtractor.h"
 #include "include/FLACExtractor.h"
 #include "include/AACExtractor.h"
-#ifdef QCOM_HARDWARE
 #include "include/ExtendedExtractor.h"
-#else
-#include "include/AVIExtractor.h"
-#endif
 
 #include <media/stagefright/MediaDefs.h>
 
@@ -70,9 +66,7 @@ status_t DataSource::getSize(off64_t *size) {
 
 Mutex DataSource::gSnifferMutex;
 List<DataSource::SnifferFunc> DataSource::gSniffers;
-#ifdef QCOM_HARDWARE
 List<DataSource::SnifferFunc>::iterator DataSource::extendedSnifferPosition;
-#endif
 
 bool DataSource::sniff(
         String8 *mimeType, float *confidence, sp<AMessage> *meta) {
@@ -84,21 +78,18 @@ bool DataSource::sniff(
     for (List<SnifferFunc>::iterator it = gSniffers.begin();
          it != gSniffers.end(); ++it) {
 
-#ifdef QCOM_HARDWARE
         //Dont call the first sniffer from extended extarctor
         if(it == extendedSnifferPosition)
             continue;
-#endif
 
         String8 newMimeType;
-        float newConfidence;
+        float newConfidence = 0.0;
         sp<AMessage> newMeta;
         if ((*it)(this, &newMimeType, &newConfidence, &newMeta)) {
             if (newConfidence > *confidence) {
                 *mimeType = newMimeType;
                 *confidence = newConfidence;
                 *meta = newMeta;
-#ifdef QCOM_HARDWARE
                 if(*confidence >= 0.6f) {
 
                     LOGV("Ignore other Sniffers - confidence = %f , mimeType = %s",*confidence,mimeType->string());
@@ -112,7 +103,7 @@ bool DataSource::sniff(
                         //if this is fragmented or not.
                         LOGV("calling Extended Sniff if mimeType = %s ",(*mimeType).string());
                         String8 tmpMimeType;
-                        float tmpConfidence;
+                        float tmpConfidence = 0.0 ;
                         sp<AMessage> tmpMeta;
                         (*extendedSnifferPosition)(this, &tmpMimeType, &tmpConfidence, &tmpMeta);
                         if (tmpConfidence > *confidence) {
@@ -125,7 +116,6 @@ bool DataSource::sniff(
 
                     break;
                 }
-#endif
             }
         }
     }
@@ -134,11 +124,7 @@ bool DataSource::sniff(
 }
 
 // static
-#ifdef QCOM_HARDWARE
 void DataSource::RegisterSniffer(SnifferFunc func, bool isExtendedExtractor) {
-#else
-void DataSource::RegisterSniffer(SnifferFunc func) {
-#endif
     Mutex::Autolock autoLock(gSnifferMutex);
 
     for (List<SnifferFunc>::iterator it = gSniffers.begin();
@@ -150,7 +136,6 @@ void DataSource::RegisterSniffer(SnifferFunc func) {
 
     gSniffers.push_back(func);
 
-#ifdef QCOM_HARDWARE
     if(isExtendedExtractor)
     {
         extendedSnifferPosition = gSniffers.end();
@@ -158,7 +143,6 @@ void DataSource::RegisterSniffer(SnifferFunc func) {
     }
 
     return;
-#endif
 }
 
 // static
@@ -173,9 +157,7 @@ void DataSource::RegisterDefaultSniffers() {
     RegisterSniffer(SniffMP3);
     RegisterSniffer(SniffAAC);
     RegisterSniffer(SniffMPEG2PS);
-#ifdef QCOM_HARDWARE
     ExtendedExtractor::RegisterSniffers();
-#endif
 
     char value[PROPERTY_VALUE_MAX];
     if (property_get("drm.service.enabled", value, NULL)

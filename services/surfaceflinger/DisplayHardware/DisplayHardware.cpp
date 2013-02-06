@@ -173,17 +173,14 @@ void DisplayHardware::init(uint32_t dpy)
             LOGW("H/W composition disabled");
             attribs[2] = EGL_CONFIG_CAVEAT;
             attribs[3] = EGL_SLOW_CONFIG;
-#ifdef QCOM_HARDWARE
         } else {
             // We have hardware composition enabled. Check the composition type
             if (property_get("debug.composition.type", property, NULL) > 0) {
-                if ((strncmp(property, "c2d", 3) == 0) ||
-                    (strncmp(property, "dyn", 3) == 0))
-                    mFlags |= C2D_COMPOSITION;
+                if((strncmp(property, "c2d", 3)) == 0)
+                    mFlags |=  C2D_COMPOSITION;
                 else if ((strncmp(property, "mdp", 3)) == 0)
                     mFlags |= MDP_COMPOSITION;
             }
-#endif
         }
     }
 
@@ -195,13 +192,9 @@ void DisplayHardware::init(uint32_t dpy)
     eglGetConfigs(display, NULL, 0, &numConfigs);
 
     EGLConfig config = NULL;
-#ifdef FORCE_EGL_CONFIG
-    config = (EGLConfig)FORCE_EGL_CONFIG;
-#else
     err = selectConfigForPixelFormat(display, attribs, format, &config);
     LOGE_IF(err, "couldn't find an EGLConfig matching the screen format");
-#endif
-
+    
     EGLint r,g,b,a;
     eglGetConfigAttrib(display, config, EGL_RED_SIZE,   &r);
     eglGetConfigAttrib(display, config, EGL_GREEN_SIZE, &g);
@@ -416,4 +409,9 @@ void DisplayHardware::makeCurrent() const
 void DisplayHardware::dump(String8& res) const
 {
     mNativeWindow->dump(res);
+}
+
+void DisplayHardware::perform(int event, int info) const
+{
+    mNativeWindow->perform(event, info);
 }

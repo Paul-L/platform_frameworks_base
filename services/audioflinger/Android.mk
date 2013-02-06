@@ -24,22 +24,18 @@ LOCAL_SHARED_LIBRARIES := \
     libdl \
     libpowermanager
 
+# SRS Processing
+ifeq ($(strip $(BOARD_USES_SRS_TRUEMEDIA)),true)
+LOCAL_SHARED_LIBRARIES += libsrsprocessing
+LOCAL_CFLAGS += -DSRS_PROCESSING
+LOCAL_C_INCLUDES += vendor/qcom/proprietary/mm-audio/audio-effects/srs/TruMedia
+endif
+# SRS Processing
+
 LOCAL_STATIC_LIBRARIES := \
     libcpustats \
     libmedia_helper
 
 LOCAL_MODULE:= libaudioflinger
-
-ifeq ($(BOARD_USE_MOTO_DOCK_HACK),true)
-   LOCAL_CFLAGS += -DMOTO_DOCK_HACK
-endif
-
-ifeq ($(BOARD_HAS_SAMSUNG_VOLUME_BUG),true)
-   LOCAL_CFLAGS += -DHAS_SAMSUNG_VOLUME_BUG
-endif
-
-ifeq ($(ARCH_ARM_HAVE_NEON),true)
-   LOCAL_CFLAGS += -D__ARM_HAVE_NEON
-endif
 
 include $(BUILD_SHARED_LIBRARY)

@@ -30,9 +30,7 @@
 #include "include/WVMExtractor.h"
 #include "include/FLACExtractor.h"
 #include "include/AACExtractor.h"
-#ifdef QCOM_HARDWARE
 #include "include/ExtendedExtractor.h"
-#endif
 
 #include "matroska/MatroskaExtractor.h"
 
@@ -121,6 +119,7 @@ sp<MediaExtractor> MediaExtractor::Create(
         ret = new MPEG2PSExtractor(source);
     }
 
+
     if (ret != NULL) {
        if (isDrm) {
            ret->setDrmFlag(true);
@@ -129,14 +128,21 @@ sp<MediaExtractor> MediaExtractor::Create(
        }
     }
 
-#ifdef QCOM_HARDWARE
-    if (ret) return ret;
+    //If default extractor created, then pass them
+    if (ret){
+        return ret;
+    }
 
-        LOGV(" Using ExtendedExtractor\n");
-    return ExtendedExtractor::CreateExtractor(source, mime);
-#else
+    //Create Extended Extractor only if default extractor are not selected
+    LOGV(" Using ExtendedExtractor\n");
+    sp<MediaExtractor> retextParser =  ExtendedExtractor::CreateExtractor(source, mime);
+
+    if (retextParser != NULL){
+        return retextParser;
+    }
+
+
     return ret;
-#endif
 }
 
 }  // namespace android

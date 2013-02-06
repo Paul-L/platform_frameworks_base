@@ -97,7 +97,6 @@ public:
     virtual ~GraphicBufferAlloc();
     virtual sp<GraphicBuffer> createGraphicBuffer(uint32_t w, uint32_t h,
         PixelFormat format, uint32_t usage, status_t* error);
-#ifdef QCOM_HARDWARE
     virtual void freeAllGraphicBuffersExcept(int bufIdx);
     virtual void freeGraphicBufferAtIndex(int bufIdx);
     virtual void setGraphicBufferSize(int size);
@@ -106,7 +105,6 @@ private:
     Mutex mLock;
     int mFreedIndex;
     int mSize;
-#endif
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +180,11 @@ public:
     virtual int                         setOrientation(DisplayID dpy, int orientation, uint32_t flags);
     virtual bool                        authenticateSurfaceTexture(const sp<ISurfaceTexture>& surface) const;
 
+    //HDMI Specific
+    virtual void                        enableExternalDisplay(int disp_type, int externaltype);
+    //Qcom specific
+    virtual void                        perform(int event, int info);
+
     virtual status_t captureScreen(DisplayID dpy,
             sp<IMemoryHeap>* heap,
             uint32_t* width, uint32_t* height,
@@ -213,8 +216,6 @@ public:
     sp<Layer> getLayer(const sp<ISurface>& sur) const;
 
     GLuint getProtectedTexName() const { return mProtectedTexName; }
-
-    inline int  getUseDithering() const { return mUseDithering; }
 
 
     class MessageDestroyGLTexture : public MessageBase {
@@ -347,13 +348,9 @@ private:
             void        debugShowFPS() const;
             void        drawWormhole() const;
 
-#ifdef QCOM_HDMI_OUT
             //HDMI Specific
             void updateHwcExternalDisplay(int externaltype);
-#endif
-#ifdef QCOM_HARDWARE
             bool isGPULayerPresent();
-#endif
 
     mutable     MessageQueue    mEventQueue;
 
@@ -406,16 +403,12 @@ private:
                 volatile nsecs_t            mDebugInTransaction;
                 nsecs_t                     mLastTransactionTime;
                 bool                        mBootFinished;
-                
-#ifdef QCOM_HDMI_OUT
+
                 //HDMI specific
                 int                         mExtDispOutput;
                 Mutex                       mExtDispLock;
                 bool                        mOrientationChanged;
-#endif
-#ifdef QCOM_HARDWARE
                 bool                        mCanSkipComposition;
-#endif
 
                 // these are thread safe
     mutable     Barrier                     mReadyToRunBarrier;
@@ -434,8 +427,6 @@ private:
 
    // only written in the main thread, only read in other threads
    volatile     int32_t                     mSecureFrameBuffer;
-
-                bool                        mUseDithering;
 };
 
 // ---------------------------------------------------------------------------

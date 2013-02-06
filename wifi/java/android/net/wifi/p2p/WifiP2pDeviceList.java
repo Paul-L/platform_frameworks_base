@@ -72,6 +72,14 @@ public class WifiP2pDeviceList implements Parcelable {
                 d.wpsConfigMethodsSupported = device.wpsConfigMethodsSupported;
                 d.deviceCapability = device.deviceCapability;
                 d.groupCapability = device.groupCapability;
+                if (d.status == WifiP2pDevice.FAILED)
+                {
+                    d.status = WifiP2pDevice.AVAILABLE;
+                }
+                if(device.wfdInfo != null) {
+                    d.wfdInfo = device.wfdInfo;
+                }
+
                 return;
             }
         }

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (c) 2011-2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,12 +62,12 @@ import com.android.systemui.R;
 public class NetworkController extends BroadcastReceiver {
     // debug
     static final String TAG = "StatusBar.NetworkController";
-    static final boolean DEBUG = false;
-    static final boolean CHATTY = false; // additional diagnostics, but not logspew
+    static final boolean DEBUG = true;
+    static final boolean CHATTY = true; // additional diagnostics, but not logspew
 
     // telephony
     boolean mHspaDataDistinguishable;
-    final TelephonyManager mPhone;
+    protected TelephonyManager mPhone;
     boolean mDataConnected;
     IccCard.State mSimState = IccCard.State.READY;
     int mPhoneState = TelephonyManager.CALL_STATE_IDLE;
@@ -83,6 +84,8 @@ public class NetworkController extends BroadcastReceiver {
     int mDataDirectionIconId; // data + data direction on phones
     int mDataSignalIconId;
     int mDataTypeIconId;
+    int mNoSimIconId;
+    int mLastSimIconId;
     boolean mDataActive;
     int mMobileActivityIconId; // overlay arrows for data direction
     int mLastSignalLevel;
@@ -97,8 +100,8 @@ public class NetworkController extends BroadcastReceiver {
     String mContentDescriptionDataType;
 
     // wifi
-    final WifiManager mWifiManager;
-    AsyncChannel mWifiChannel;
+    protected WifiManager mWifiManager;
+    protected AsyncChannel mWifiChannel;
     boolean mWifiEnabled, mWifiConnected;
     int mWifiRssi, mWifiLevel;
     String mWifiSsid;
@@ -107,28 +110,29 @@ public class NetworkController extends BroadcastReceiver {
     int mWifiActivity = WifiManager.DATA_ACTIVITY_NONE;
 
     // bluetooth
-    private boolean mBluetoothTethered = false;
-    private int mBluetoothTetherIconId =
+    protected boolean mBluetoothTethered = false;
+    protected int mBluetoothTetherIconId =
         com.android.internal.R.drawable.stat_sys_tether_bluetooth;
 
     //wimax
     private boolean mWimaxSupported = false;
-    private boolean mIsWimaxEnabled = false;
-    private boolean mWimaxConnected = false;
+    protected boolean mIsWimaxEnabled = false;
+    protected boolean mWimaxConnected = false;
     private boolean mWimaxIdle = false;
-    private int mWimaxIconId = 0;
+    protected int mWimaxIconId = 0;
     private int mWimaxSignal = 0;
     private int mWimaxState = 0;
     private int mWimaxExtraState = 0;
+    private int mDataServiceState = ServiceState.STATE_OUT_OF_SERVICE;
     // data connectivity (regardless of state, can we access the internet?)
     // state of inet connection - 0 not connected, 100 connected
-    private int mInetCondition = 0;
-    private static final int INET_CONDITION_THRESHOLD = 50;
+    protected int mInetCondition = 0;
+    protected static final int INET_CONDITION_THRESHOLD = 50;
 
-    private boolean mAirplaneMode = false;
+    protected boolean mAirplaneMode = false;
 
     // our ui
-    Context mContext;
+    protected Context mContext;
     ArrayList<ImageView> mPhoneSignalIconViews = new ArrayList<ImageView>();
     ArrayList<ImageView> mDataDirectionIconViews = new ArrayList<ImageView>();
     ArrayList<ImageView> mDataDirectionOverlayIconViews = new ArrayList<ImageView>();
@@ -149,7 +153,7 @@ public class NetworkController extends BroadcastReceiver {
     int mLastDataTypeIconId = -1;
     String mLastCombinedLabel = "";
 
-    private boolean mHasMobileDataFeature;
+    protected boolean mHasMobileDataFeature;
 
     boolean mDataAndWifiStacked = false;
 
@@ -160,7 +164,8 @@ public class NetworkController extends BroadcastReceiver {
         void setWifiIndicators(boolean visible, int strengthIcon, int activityIcon,
                 String contentDescription);
         void setMobileDataIndicators(boolean visible, int strengthIcon, int activityIcon,
-                int typeIcon, String contentDescription, String typeContentDescription);
+                int typeIcon, String contentDescription, String typeContentDescription,
+                int noSimIcon);
         void setIsAirplaneMode(boolean is);
     }
 
@@ -185,13 +190,7 @@ public class NetworkController extends BroadcastReceiver {
         updateWimaxIcons();
 
         // telephony
-        mPhone = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
-        mPhone.listen(mPhoneStateListener,
-                          PhoneStateListener.LISTEN_SERVICE_STATE
-                        | PhoneStateListener.LISTEN_SIGNAL_STRENGTHS
-                        | PhoneStateListener.LISTEN_CALL_STATE
-                        | PhoneStateListener.LISTEN_DATA_CONNECTION_STATE
-                        | PhoneStateListener.LISTEN_DATA_ACTIVITY);
+        registerPhoneStateListener(context);
         mHspaDataDistinguishable = mContext.getResources().getBoolean(
                 R.bool.config_hspa_data_distinguishable);
         mNetworkNameSeparator = mContext.getString(R.string.status_bar_network_name_separator);
@@ -199,14 +198,7 @@ public class NetworkController extends BroadcastReceiver {
                 com.android.internal.R.string.lockscreen_carrier_default);
         mNetworkName = mNetworkNameDefault;
 
-        // wifi
-        mWifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
-        Handler handler = new WifiHandler();
-        mWifiChannel = new AsyncChannel();
-        Messenger wifiMessenger = mWifiManager.getMessenger();
-        if (wifiMessenger != null) {
-            mWifiChannel.connect(mContext, handler, wifiMessenger);
-        }
+        createWifiHandler();
 
         // broadcasts
         IntentFilter filter = new IntentFilter();
@@ -233,6 +225,28 @@ public class NetworkController extends BroadcastReceiver {
 
         // yuck
         mBatteryStats = BatteryStatsService.getService();
+    }
+
+    protected void createWifiHandler() {
+        // wifi
+        mWifiManager = (WifiManager) mContext.getSystemService(Context.WIFI_SERVICE);
+        Handler handler = new WifiHandler();
+        mWifiChannel = new AsyncChannel();
+        Messenger wifiMessenger = mWifiManager.getMessenger();
+        if (wifiMessenger != null) {
+            mWifiChannel.connect(mContext, handler, wifiMessenger);
+        }
+    }
+
+    protected void registerPhoneStateListener(Context context) {
+        // telephony
+        mPhone = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+        mPhone.listen(mPhoneStateListener,
+                          PhoneStateListener.LISTEN_SERVICE_STATE
+                        | PhoneStateListener.LISTEN_SIGNAL_STRENGTHS
+                        | PhoneStateListener.LISTEN_CALL_STATE
+                        | PhoneStateListener.LISTEN_DATA_CONNECTION_STATE
+                        | PhoneStateListener.LISTEN_DATA_ACTIVITY);
     }
 
     public void addPhoneSignalIconView(ImageView v) {
@@ -285,6 +299,14 @@ public class NetworkController extends BroadcastReceiver {
                 mWifiIconId,
                 mWifiActivityIconId,
                 mContentDescriptionWifi);
+        cluster.setMobileDataIndicators(
+                mHasMobileDataFeature,
+                mPhoneSignalIconId,
+                mMobileActivityIconId,
+                mDataTypeIconId,
+                mContentDescriptionPhoneSignal,
+                mContentDescriptionDataType,
+                mNoSimIconId);
 
         if (mIsWimaxEnabled && mWimaxConnected) {
             // wimax is special
@@ -294,7 +316,8 @@ public class NetworkController extends BroadcastReceiver {
                     mMobileActivityIconId,
                     mDataTypeIconId,
                     mContentDescriptionWimax,
-                    mContentDescriptionDataType);
+                    mContentDescriptionDataType,
+                    mNoSimIconId);
         } else {
             // normal mobile data
             cluster.setMobileDataIndicators(
@@ -303,7 +326,8 @@ public class NetworkController extends BroadcastReceiver {
                     mMobileActivityIconId,
                     mDataTypeIconId,
                     mContentDescriptionPhoneSignal,
-                    mContentDescriptionDataType);
+                    mContentDescriptionDataType,
+                    mNoSimIconId);
         }
         cluster.setIsAirplaneMode(mAirplaneMode);
     }
@@ -365,9 +389,19 @@ public class NetworkController extends BroadcastReceiver {
         @Override
         public void onServiceStateChanged(ServiceState state) {
             if (DEBUG) {
-                Slog.d(TAG, "onServiceStateChanged state=" + state.getState());
+                Slog.d(TAG, "onServiceStateChanged state=" + state);
             }
             mServiceState = state;
+            if (SystemProperties.getBoolean("ro.config.combined_signal", true)) {
+                /*
+                 * if combined_signal is set to true only then consider data
+                 * service state for signal display
+                 */
+                mDataServiceState = mServiceState.getDataState();
+                if (DEBUG) {
+                    Slog.d(TAG, "Combining data service state" + mDataServiceState + "for signal");
+                }
+            }
             updateTelephonySignalStrength();
             updateDataNetType();
             updateDataIcon();
@@ -410,10 +444,13 @@ public class NetworkController extends BroadcastReceiver {
         }
     };
 
-    private final void updateSimState(Intent intent) {
+    protected void updateSimState(Intent intent) {
         String stateExtra = intent.getStringExtra(IccCard.INTENT_KEY_ICC_STATE);
         if (IccCard.INTENT_VALUE_ICC_ABSENT.equals(stateExtra)) {
             mSimState = IccCard.State.ABSENT;
+        }
+        else if (IccCard.INTENT_VALUE_ICC_CARD_IO_ERROR.equals(stateExtra)) {
+            mSimState = IccCard.State.CARD_IO_ERROR;
         }
         else if (IccCard.INTENT_VALUE_ICC_READY.equals(stateExtra)) {
             mSimState = IccCard.State.READY;
@@ -427,11 +464,12 @@ public class NetworkController extends BroadcastReceiver {
                 mSimState = IccCard.State.PUK_REQUIRED;
             }
             else {
-                mSimState = IccCard.State.NETWORK_LOCKED;
+                mSimState = IccCard.State.PERSO_LOCKED;
             }
         } else {
             mSimState = IccCard.State.UNKNOWN;
         }
+        updateSimIcon();
     }
 
     private boolean isCdma() {
@@ -452,19 +490,24 @@ public class NetworkController extends BroadcastReceiver {
         }
     }
 
-    private void updateAirplaneMode() {
+    protected void updateAirplaneMode() {
         mAirplaneMode = (Settings.System.getInt(mContext.getContentResolver(),
             Settings.System.AIRPLANE_MODE_ON, 0) == 1);
     }
 
     private final void updateTelephonySignalStrength() {
-        if (!hasService()) {
-            if (CHATTY) Slog.d(TAG, "updateTelephonySignalStrength: !hasService()");
+
+        if (!hasService() &&
+                (mDataServiceState != ServiceState.STATE_IN_SERVICE)) {
+            if (DEBUG) Slog.d(TAG, " No service");
             mPhoneSignalIconId = R.drawable.stat_sys_signal_null;
             mDataSignalIconId = R.drawable.stat_sys_signal_null;
         } else {
-            if (mSignalStrength == null) {
-                if (CHATTY) Slog.d(TAG, "updateTelephonySignalStrength: mSignalStrength == null");
+            if ((mSignalStrength == null) || (mServiceState == null)) {
+                if (DEBUG) {
+                    Slog.d(TAG, " Null object, mSignalStrength= " + mSignalStrength
+                            + " mServiceState " + mServiceState);
+                }
                 mPhoneSignalIconId = R.drawable.stat_sys_signal_null;
                 mDataSignalIconId = R.drawable.stat_sys_signal_null;
                 mContentDescriptionPhoneSignal = mContext.getString(
@@ -472,6 +515,9 @@ public class NetworkController extends BroadcastReceiver {
             } else {
                 int iconLevel;
                 int[] iconList;
+
+
+                // Though mPhone is a Manager, this call is not an IPC
                 if (isCdma() && mAlwaysShowCdmaRssi) {
                     mLastSignalLevel = iconLevel = mSignalStrength.getCdmaLevel();
                     if(DEBUG) Slog.d(TAG, "mAlwaysShowCdmaRssi=" + mAlwaysShowCdmaRssi
@@ -481,20 +527,12 @@ public class NetworkController extends BroadcastReceiver {
                     mLastSignalLevel = iconLevel = mSignalStrength.getLevel();
                 }
 
-                if (isCdma()) {
-                    if (isCdmaEri()) {
-                        iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH_ROAMING[mInetCondition];
-                    } else {
-                        iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH[mInetCondition];
-                    }
+                if ((isCdma() && isCdmaEri()) || mPhone.isNetworkRoaming()) {
+                    iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH_ROAMING[mInetCondition];
                 } else {
-                    // Though mPhone is a Manager, this call is not an IPC
-                    if (mPhone.isNetworkRoaming()) {
-                        iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH_ROAMING[mInetCondition];
-                    } else {
-                        iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH[mInetCondition];
-                    }
+                    iconList = TelephonyIcons.TELEPHONY_SIGNAL_STRENGTH[mInetCondition];
                 }
+
                 mPhoneSignalIconId = iconList[iconLevel];
                 mContentDescriptionPhoneSignal = mContext.getString(
                         AccessibilityContentDescriptions.PHONE_SIGNAL_STRENGTH[iconLevel]);
@@ -575,6 +613,7 @@ public class NetworkController extends BroadcastReceiver {
                     mDataTypeIconId = R.drawable.stat_sys_data_connected_3g;
                     mContentDescriptionDataType = mContext.getString(
                             R.string.accessibility_data_connection_3g);
+                
                     break;
                 case TelephonyManager.NETWORK_TYPE_LTE:
                     mDataIconList = TelephonyIcons.DATA_4G[mInetCondition];
@@ -582,7 +621,7 @@ public class NetworkController extends BroadcastReceiver {
                     mContentDescriptionDataType = mContext.getString(
                             R.string.accessibility_data_connection_4g);
                     break;
-                default:
+                case TelephonyManager.NETWORK_TYPE_GPRS:
                     if (!mShowAtLeastThreeGees) {
                         mDataIconList = TelephonyIcons.DATA_G[mInetCondition];
                         mDataTypeIconId = R.drawable.stat_sys_data_connected_g;
@@ -595,6 +634,14 @@ public class NetworkController extends BroadcastReceiver {
                                 R.string.accessibility_data_connection_3g);
                     }
                     break;
+
+                default:
+                    if (DEBUG) {
+                        Slog.e(TAG, "updateDataNetType unknown radio:" + mDataNetType );
+                    }
+                    mDataNetType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
+                    mDataTypeIconId = 0;
+                    break;
             }
         }
 
@@ -604,7 +651,8 @@ public class NetworkController extends BroadcastReceiver {
     }
 
     boolean isCdmaEri() {
-        if (mServiceState != null) {
+        if ((mServiceState != null)
+                && (hasService() || (mDataServiceState == ServiceState.STATE_IN_SERVICE))) {
             final int iconIndex = mServiceState.getCdmaEriIconIndex();
             if (iconIndex != EriInfo.ROAMING_INDICATOR_OFF) {
                 final int iconMode = mServiceState.getCdmaEriIconMode();
@@ -617,14 +665,26 @@ public class NetworkController extends BroadcastReceiver {
         return false;
     }
 
-    private final void updateDataIcon() {
-        int iconId;
-        boolean visible = true;
+    private final void updateSimIcon() {
+        Slog.d(TAG,"In updateSimIcon simState= " + mSimState);
+        if (mSimState ==  IccCard.State.ABSENT) {
+            mNoSimIconId = R.drawable.stat_sys_no_sim;
+        } else {
+            mNoSimIconId = 0;
+        }
+        refreshViews();
+    }
 
-        if (!isCdma()) {
+    private final void updateDataIcon() {
+        int iconId = 0;
+        boolean visible = true;
+        if (mDataNetType == TelephonyManager.NETWORK_TYPE_UNKNOWN) {
+            // If data network type is unknown do not display data icon
+            visible = false;
+        } else if (!isCdma()) {
             // GSM case, we have to check also the sim state
             if (mSimState == IccCard.State.READY || mSimState == IccCard.State.UNKNOWN) {
-                if (hasService() && mDataState == TelephonyManager.DATA_CONNECTED) {
+                if (mDataState == TelephonyManager.DATA_CONNECTED) {
                     switch (mDataActivity) {
                         case TelephonyManager.DATA_ACTIVITY_IN:
                             iconId = mDataIconList[1];
@@ -650,7 +710,7 @@ public class NetworkController extends BroadcastReceiver {
             }
         } else {
             // CDMA case, mDataActivity can be also DATA_ACTIVITY_DORMANT
-            if (hasService() && mDataState == TelephonyManager.DATA_CONNECTED) {
+            if (mDataState == TelephonyManager.DATA_CONNECTED) {
                 switch (mDataActivity) {
                     case TelephonyManager.DATA_ACTIVITY_IN:
                         iconId = mDataIconList[1];
@@ -737,7 +797,7 @@ public class NetworkController extends BroadcastReceiver {
         }
     }
 
-    private void updateWifiState(Intent intent) {
+    protected void updateWifiState(Intent intent) {
         final String action = intent.getAction();
         if (action.equals(WifiManager.WIFI_STATE_CHANGED_ACTION)) {
             mWifiEnabled = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE,
@@ -779,7 +839,7 @@ public class NetworkController extends BroadcastReceiver {
         updateWifiIcons();
     }
 
-    private void updateWifiIcons() {
+    protected void updateWifiIcons() {
         if (mWifiConnected) {
             mWifiIconId = WifiIcons.WIFI_SIGNAL_STRENGTH[mInetCondition][mWifiLevel];
             mContentDescriptionWifi = mContext.getString(
@@ -811,7 +871,7 @@ public class NetworkController extends BroadcastReceiver {
 
 
     // ===== Wimax ===================================================================
-    private final void updateWimaxState(Intent intent) {
+    protected final void updateWimaxState(Intent intent) {
         final String action = intent.getAction();
         boolean wasConnected = mWimaxConnected;
         if (action.equals(WimaxManagerConstants.NET_4G_STATE_CHANGED_ACTION)) {
@@ -835,7 +895,7 @@ public class NetworkController extends BroadcastReceiver {
         updateWimaxIcons();
     }
 
-    private void updateWimaxIcons() {
+    protected void updateWimaxIcons() {
         if (mIsWimaxEnabled) {
             if (mWimaxConnected) {
                 if (mWimaxIdle)
@@ -855,7 +915,7 @@ public class NetworkController extends BroadcastReceiver {
 
     // ===== Full or limited Internet connectivity ==================================
 
-    private void updateConnectivity(Intent intent) {
+    protected void updateConnectivity(Intent intent) {
         if (CHATTY) {
             Slog.d(TAG, "updateConnectivity: intent=" + intent);
         }
@@ -1000,6 +1060,7 @@ public class NetworkController extends BroadcastReceiver {
                     R.string.accessibility_airplane_mode);
             mPhoneSignalIconId = mDataSignalIconId = R.drawable.stat_sys_signal_flightmode;
             mDataTypeIconId = 0;
+            mNoSimIconId = 0;
 
             // combined values from connected wifi take precedence over airplane mode
             if (mWifiConnected) {
@@ -1026,7 +1087,10 @@ public class NetworkController extends BroadcastReceiver {
                 mHasMobileDataFeature ? mDataSignalIconId : mWifiIconId;
             mContentDescriptionCombinedSignal = mHasMobileDataFeature
                 ? mContentDescriptionDataType : mContentDescriptionWifi;
+        }
 
+        if (!mDataConnected) {
+            Slog.d(TAG, "refreshViews: Data not connected!! Set no data type icon");
             if ((isCdma() && isCdmaEri()) || mPhone.isNetworkRoaming()) {
                 mDataTypeIconId = R.drawable.stat_sys_data_connected_roam;
             } else {
@@ -1050,6 +1114,7 @@ public class NetworkController extends BroadcastReceiver {
                     + " mDataDirectionIconId=0x" + Integer.toHexString(mDataDirectionIconId)
                     + " mDataSignalIconId=0x" + Integer.toHexString(mDataSignalIconId)
                     + " mDataTypeIconId=0x" + Integer.toHexString(mDataTypeIconId)
+                    + " mNoSimIconId=0x" + Integer.toHexString(mNoSimIconId)
                     + " mWifiIconId=0x" + Integer.toHexString(mWifiIconId)
                     + " mBluetoothTetherIconId=0x" + Integer.toHexString(mBluetoothTetherIconId));
         }
@@ -1058,7 +1123,8 @@ public class NetworkController extends BroadcastReceiver {
          || mLastDataDirectionOverlayIconId != combinedActivityIconId
          || mLastWifiIconId                 != mWifiIconId
          || mLastWimaxIconId                != mWimaxIconId
-         || mLastDataTypeIconId             != mDataTypeIconId)
+         || mLastDataTypeIconId             != mDataTypeIconId
+         || mLastSimIconId                  != mNoSimIconId)
         {
             // NB: the mLast*s will be updated later
             for (SignalCluster cluster : mSignalClusters) {
@@ -1091,6 +1157,10 @@ public class NetworkController extends BroadcastReceiver {
                 v.setImageResource(mDataDirectionIconId);
                 v.setContentDescription(mContentDescriptionDataType);
             }
+        }
+
+        if (mLastSimIconId != mNoSimIconId) {
+            mLastSimIconId = mNoSimIconId;
         }
 
         // the wifi icon on phones
@@ -1321,7 +1391,7 @@ public class NetworkController extends BroadcastReceiver {
         pw.println("");
     }
 
-    private String getResourceName(int resId) {
+    protected String getResourceName(int resId) {
         if (resId != 0) {
             final Resources res = mContext.getResources();
             try {

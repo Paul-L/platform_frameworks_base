@@ -68,6 +68,12 @@ public class Process {
     public static final int PHONE_UID = 1001;
 
     /**
+     * Defines the UID/GID under which the bluetooth code runs.
+     * {@hide}
+     */
+    public static final int BLUETOOTH_UID = 1002;
+
+    /**
      * Defines the UID/GID for the user shell.
      * @hide
      */
@@ -96,6 +102,12 @@ public class Process {
      * @hide
      */
     public static final int SDCARD_RW_GID = 1015;
+
+    /**
+     * Defines the UID/GID for the FM process.
+     * @hide
+     */
+    public static final int FM_RADIO_UID = 1028;
 
     /**
      * Defines the UID/GID for the NFC service process.

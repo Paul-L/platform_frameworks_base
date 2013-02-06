@@ -140,9 +140,7 @@ public:
     status_t    unlockAndPost();
 
     sp<IBinder> asBinder() const;
-#ifdef QCOM_HARDWARE
     status_t    setStereoscopic3DFormat(int format);
-#endif
 
 private:
     // this is just to be able to write some unit tests

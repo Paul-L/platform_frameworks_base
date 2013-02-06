@@ -174,6 +174,25 @@ public:
         }
         return result != 0;
     }
+
+    virtual void enableExternalDisplay(int disp_type, int enable)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeInt32(disp_type);
+        data.writeInt32(enable);
+        remote()->transact(BnSurfaceComposer::EXTERNAL_DISPLAY, data, &reply);
+    }
+
+    virtual void perform(int event, int info)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeInt32(event);
+        data.writeInt32(info);
+        remote()->transact(BnSurfaceComposer::PERFORM, data, &reply);
+    }
+
 };
 
 IMPLEMENT_META_INTERFACE(SurfaceComposer, "android.ui.ISurfaceComposer");
@@ -254,6 +273,19 @@ status_t BnSurfaceComposer::onTransact(
             int32_t result = authenticateSurfaceTexture(surfaceTexture) ? 1 : 0;
             reply->writeInt32(result);
         } break;
+        case EXTERNAL_DISPLAY: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            int disp_type = data.readInt32();
+            int enable = data.readInt32();
+            enableExternalDisplay(disp_type, enable);
+        } break;
+        case PERFORM: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            int event = data.readInt32();
+            int info = data.readInt32();
+            perform(event, info);
+        } break;
+
         default:
             return BBinder::onTransact(code, data, reply, flags);
     }

@@ -120,6 +120,7 @@ private:
     // will be sent to the client side using which the
     // frame buffers will be queued and dequeued
     sp<SurfaceMediaSource> mSurfaceMediaSource;
+    bool mDisableAudio;
 
     status_t setupMPEG4Recording(
         int outputFd,
@@ -131,6 +132,7 @@ private:
         sp<MetaData> *meta);
     status_t startMPEG4Recording();
     status_t startAMRRecording();
+    status_t startFMA2DPWriter();
     status_t startAACRecording();
     status_t startRawAudioRecording();
     status_t startRTPRecording();
@@ -187,6 +189,9 @@ private:
 
     StagefrightRecorder(const StagefrightRecorder &);
     StagefrightRecorder &operator=(const StagefrightRecorder &);
+
+    /* extension */
+    status_t startExtendedRecording();
 };
 
 }  // namespace android

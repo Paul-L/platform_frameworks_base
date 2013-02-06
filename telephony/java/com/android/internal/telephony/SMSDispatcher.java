@@ -27,6 +27,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.DialogInterface;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.SQLException;
@@ -36,6 +37,8 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.SystemProperties;
+import android.os.Registrant;
+import android.preference.PreferenceManager;
 import android.provider.Telephony;
 import android.provider.Telephony.Sms.Intents;
 import android.provider.Settings;
@@ -45,6 +48,7 @@ import android.util.Log;
 import android.view.WindowManager;
 
 import com.android.internal.telephony.SmsMessageBase.TextEncodingDetails;
+import com.android.internal.telephony.CommandsInterface.RadioTechnologyFamily;
 import com.android.internal.util.HexDump;
 
 import java.io.ByteArrayOutputStream;
@@ -113,11 +117,42 @@ public abstract class SMSDispatcher extends Handler {
     /** Stop the sending */
     static final int EVENT_STOP_SENDING = 7;        // accessed from inner class
 
-    protected final Phone mPhone;
+    /** Radio is ON */
+    static final protected int EVENT_RADIO_ON = 8;
+
+    /** IMS registration/SMS encoding changed */
+    static final protected int EVENT_IMS_STATE_CHANGED = 9;
+
+    /** Callback from RIL_REQUEST_IMS_REGISTRATION_STATE */
+    static final protected int EVENT_IMS_STATE_DONE = 10;
+
+    /** Retry sending a previously failed SMS message */
+    static final protected int EVENT_PROCESS_SEND_RETRY = 11;
+
+    /** Uicc Event */
+    static final protected int EVENT_ICC_CHANGED = 12;
+
+    /** Class2 SMS  */
+    static final protected int EVENT_SMS_ON_ICC = 13;
+
+    static final protected int EVENT_GET_ICC_SMS_DONE = 14;
+
+    static final protected int EVENT_UPDATE_ICC_MWI = 20;
+
+    /** Must be static as they are referenced by 3 derived instances, Ims/Cdma/GsmSMSDispatcher */
+    /** true if IMS is registered, false otherwise.*/
+    static protected boolean mIms = false;
+    static protected RadioTechnologyFamily mImsSmsEncoding = RadioTechnologyFamily.RADIO_TECH_UNKNOWN;
+    protected Phone mPhone;
     protected final Context mContext;
     protected final ContentResolver mResolver;
     protected final CommandsInterface mCm;
     protected final SmsStorageMonitor mStorageMonitor;
+
+    /** icc stuff */
+    protected UiccManager mUiccManager = null;
+    protected UiccCardApplication mUiccApplication = null;
+    protected IccRecords mIccRecords = null;
 
     protected final WapPushOverSms mWapPush;
 
@@ -125,8 +160,13 @@ public abstract class SMSDispatcher extends Handler {
 
     /** Maximum number of times to retry sending a failed SMS. */
     private static final int MAX_SEND_RETRIES = 3;
-    /** Delay before next send attempt on a failed SMS, in milliseconds. */
-    private static final int SEND_RETRY_DELAY = 2000;
+    /** Default for delay before next send attempt on a failed SMS, in milliseconds. */
+    private static final int DEFAULT_SEND_RETRY_DELAY = 2000;
+    /** Currently used delay for sms sending retries. */
+    private static int mSendRetryDelay = SystemProperties.getInt(
+            TelephonyProperties.PROPERTY_SMS_RETRY_DELAY,
+            DEFAULT_SEND_RETRY_DELAY);
+
     /** single part SMS */
     private static final int SINGLE_PART_SMS = 1;
     /** Message sending queue limit */
@@ -161,6 +201,12 @@ public abstract class SMSDispatcher extends Handler {
 
     protected int mRemainingMessages = -1;
 
+    /** List of messages awaiting to be sent.
+     * Message at index 0 is the one currently being sent
+     */
+    private ArrayList<SmsTracker> mPendingMessagesList;
+    private boolean mSyncronousSending;
+
     protected static int getNextConcatenatedRef() {
         sConcatenatedRef += 1;
         return sConcatenatedRef;
@@ -190,13 +236,30 @@ public abstract class SMSDispatcher extends Handler {
                                 TelephonyProperties.PROPERTY_SMS_RECEIVE, mSmsCapable);
         mSmsSendDisabled = !SystemProperties.getBoolean(
                                 TelephonyProperties.PROPERTY_SMS_SEND, mSmsCapable);
+        mPendingMessagesList = new ArrayList<SmsTracker>();
+        mSyncronousSending = SystemProperties.getBoolean(
+                TelephonyProperties.SMS_SYNCHRONOUS_SENDING,
+                false);
         Log.d(TAG, "SMSDispatcher: ctor mSmsCapable=" + mSmsCapable + " format=" + getFormat()
                 + " mSmsReceiveDisabled=" + mSmsReceiveDisabled
                 + " mSmsSendDisabled=" + mSmsSendDisabled);
+        mUiccManager = UiccManager.getInstance();
+        mUiccManager.registerForIccChanged(this, EVENT_ICC_CHANGED, null);
+    }
+
+    protected void updatePhoneObject(Phone phone) {
+        mPhone = phone;
+        String phoneType =
+            (phone instanceof com.android.internal.telephony.cdma.CDMAPhone ) ?
+                    "CDMA" : "GSM";
+        Log.d(TAG, "Active phone changed to " + phoneType );
     }
 
     /** Unregister for incoming SMS events. */
-    public abstract void dispose();
+    public void dispose() {
+        //cleanup icc stuff
+        mUiccManager.unregisterForIccChanged(this);
+    }
 
     /**
      * The format of the message PDU in the associated broadcast intent.
@@ -275,7 +338,8 @@ public abstract class SMSDispatcher extends Handler {
             break;
 
         case EVENT_SEND_RETRY:
-            sendSms((SmsTracker) msg.obj);
+            Log.d(TAG, "SMS retry..");
+            sendRetrySms((SmsTracker) msg.obj);
             break;
 
         case EVENT_POST_ALERT:
@@ -288,7 +352,8 @@ public abstract class SMSDispatcher extends Handler {
             if (mSTrackers.isEmpty() == false) {
                 try {
                     SmsTracker sTracker = mSTrackers.remove(0);
-                    sTracker.mSentIntent.send(RESULT_ERROR_LIMIT_EXCEEDED);
+                    if (sTracker.mSentIntent != null)
+                        sTracker.mSentIntent.send(RESULT_ERROR_LIMIT_EXCEEDED);
                 } catch (CanceledException ex) {
                     Log.e(TAG, "failed to send back RESULT_ERROR_LIMIT_EXCEEDED");
                 }
@@ -322,6 +387,28 @@ public abstract class SMSDispatcher extends Handler {
                 removeMessages(EVENT_ALERT_TIMEOUT, msg.obj);
             }
             break;
+
+        case EVENT_ICC_CHANGED:
+            updateIccAvailability();
+            break;
+
+        case EVENT_SMS_ON_ICC:
+            handleSmsOnIcc((AsyncResult) msg.obj);
+            break;
+
+        case EVENT_GET_ICC_SMS_DONE:
+            handleGetIccSmsDone((AsyncResult) msg.obj);
+            break;
+
+        case EVENT_UPDATE_ICC_MWI:
+            ar = (AsyncResult) msg.obj;
+            if ( ar == null)
+                break;
+            if (ar.exception != null) {
+                Log.v(TAG, " MWI update on card failed " + ar.exception );
+                storeVoiceMailCount();
+            }
+            break;
         }
     }
 
@@ -348,6 +435,17 @@ public abstract class SMSDispatcher extends Handler {
     }
 
     /**
+     * Called when Class2 SMS is retrieved from SIM.
+     */
+    protected abstract void handleGetIccSmsDone(AsyncResult ar);
+
+
+    /**
+     * Called when SMS is received on SIM.
+     */
+    protected abstract void handleSmsOnIcc(AsyncResult ar);
+
+    /**
      * Called when SMS send completes. Broadcasts a sentIntent on success.
      * On failure, either sets up retries or broadcasts a sentIntent with
      * the failure in the result code.
@@ -360,6 +458,12 @@ public abstract class SMSDispatcher extends Handler {
         SmsTracker tracker = (SmsTracker) ar.userObj;
         PendingIntent sentIntent = tracker.mSentIntent;
 
+        if (ar.result != null) {
+            tracker.mMessageRef =  ((SmsResponse)ar.result).messageRef;
+        } else {
+            Log.e(TAG, "SmsResponse was null ");
+        }
+
         if (ar.exception == null) {
             if (false) {
                 Log.d(TAG, "SMS send complete. Broadcasting "
@@ -368,8 +472,6 @@ public abstract class SMSDispatcher extends Handler {
 
             if (tracker.mDeliveryIntent != null) {
                 // Expecting a status report.  Add it to the list.
-                int messageRef = ((SmsResponse)ar.result).messageRef;
-                tracker.mMessageRef = messageRef;
                 deliveryPendingList.add(tracker);
             }
 
@@ -388,6 +490,11 @@ public abstract class SMSDispatcher extends Handler {
                     }
                 } catch (CanceledException ex) {}
             }
+
+            if (mSyncronousSending) {
+                processNextPendingMessage();
+            }
+
         } else {
             if (false) {
                 Log.d(TAG, "SMS send failed");
@@ -395,7 +502,22 @@ public abstract class SMSDispatcher extends Handler {
 
             int ss = mPhone.getServiceState().getState();
 
-            if (ss != ServiceState.STATE_IN_SERVICE) {
+            if ( tracker.mImsRetry > 0 && ss != ServiceState.STATE_IN_SERVICE) {
+                // This is retry after failure over IMS but voice is not available.
+                // Set retry to max allowed, so no retry is sent and
+                //   cause RESULT_ERROR_GENERIC_FAILURE to be returned to app.
+                tracker.mRetryCount = MAX_SEND_RETRIES;
+
+                Log.d(TAG, "handleSendComplete: Skipping retry: "
+                +" isIms()="+isIms()
+                +" mRetryCount="+tracker.mRetryCount
+                +" mImsRetry="+tracker.mImsRetry
+                +" mMessageRef="+tracker.mMessageRef
+                +" SS= "+mPhone.getServiceState().getState());
+            }
+
+            // if IMS not registered on data and voice is not available...
+            if (!isIms() && ss != ServiceState.STATE_IN_SERVICE) {
                 handleNotInService(ss, tracker);
             } else if ((((CommandException)(ar.exception)).getCommandError()
                     == CommandException.Error.SMS_FAIL_RETRY) &&
@@ -410,7 +532,7 @@ public abstract class SMSDispatcher extends Handler {
                 //       implementations this retry is handled by the baseband.
                 tracker.mRetryCount++;
                 Message retryMsg = obtainMessage(EVENT_SEND_RETRY, tracker);
-                sendMessageDelayed(retryMsg, SEND_RETRY_DELAY);
+                sendMessageDelayed(retryMsg, mSendRetryDelay);
             } else if (tracker.mSentIntent != null) {
                 int error = RESULT_ERROR_GENERIC_FAILURE;
 
@@ -434,6 +556,10 @@ public abstract class SMSDispatcher extends Handler {
 
                     tracker.mSentIntent.send(mContext, error, fillIn);
                 } catch (CanceledException ex) {}
+
+                if (mSyncronousSending) {
+                    processNextPendingMessage();
+                }
             }
         }
     }
@@ -467,7 +593,7 @@ public abstract class SMSDispatcher extends Handler {
      *         {@link Activity#RESULT_OK} if the message has been broadcast
      *         to applications
      */
-    public abstract int dispatchMessage(SmsMessageBase sms);
+    protected abstract int dispatchMessage(SmsMessageBase sms);
 
     /**
      * Dispatch a normal incoming SMS. This is called from the format-specific
@@ -669,6 +795,8 @@ public abstract class SMSDispatcher extends Handler {
         Intent intent = new Intent(Intents.SMS_RECEIVED_ACTION);
         intent.putExtra("pdus", pdus);
         intent.putExtra("format", getFormat());
+        intent.putExtra(MSimConstants.SUBSCRIPTION_KEY,
+                 mPhone.getSubscription()); //Subscription information to be passed in an intent
         dispatch(intent, RECEIVE_SMS_PERMISSION);
     }
 
@@ -683,6 +811,8 @@ public abstract class SMSDispatcher extends Handler {
         Intent intent = new Intent(Intents.DATA_SMS_RECEIVED_ACTION, uri);
         intent.putExtra("pdus", pdus);
         intent.putExtra("format", getFormat());
+        intent.putExtra(MSimConstants.SUBSCRIPTION_KEY,
+                 mPhone.getSubscription()); //Subscription information to be passed in an intent
         dispatch(intent, RECEIVE_SMS_PERMISSION);
     }
 
@@ -846,11 +976,11 @@ public abstract class SMSDispatcher extends Handler {
 
     /**
      * Send a SMS
-     *
-     * @param smsc the SMSC to send the message through, or NULL for the
+     * @param tracker will contain:
+     * -smsc the SMSC to send the message through, or NULL for the
      *  default SMSC
-     * @param pdu the raw PDU to send
-     * @param sentIntent if not NULL this <code>Intent</code> is
+     * -pdu the raw PDU to send
+     * -sentIntent if not NULL this <code>Intent</code> is
      *  broadcast when the message is successfully sent, or failed.
      *  The result code will be <code>Activity.RESULT_OK<code> for success,
      *  or one of these errors:
@@ -861,12 +991,15 @@ public abstract class SMSDispatcher extends Handler {
      *  The per-application based SMS control checks sentIntent. If sentIntent
      *  is NULL the caller will be checked against all unknown applications,
      *  which cause smaller number of SMS to be sent in checking period.
-     * @param deliveryIntent if not NULL this <code>Intent</code> is
+     * -deliveryIntent if not NULL this <code>Intent</code> is
      *  broadcast when the message is delivered to the recipient.  The
      *  raw pdu of the status report is in the extended data ("pdu").
      */
-    protected void sendRawPdu(byte[] smsc, byte[] pdu, PendingIntent sentIntent,
-            PendingIntent deliveryIntent) {
+    protected void sendRawPdu(SmsTracker tracker) {
+        HashMap map = tracker.mData;
+        byte pdu[] = (byte[]) map.get("pdu");
+
+        PendingIntent sentIntent = tracker.mSentIntent;
         if (mSmsSendDisabled) {
             if (sentIntent != null) {
                 try {
@@ -886,20 +1019,19 @@ public abstract class SMSDispatcher extends Handler {
             return;
         }
 
-        HashMap<String, Object> map = new HashMap<String, Object>();
-        map.put("smsc", smsc);
-        map.put("pdu", pdu);
-
-        SmsTracker tracker = new SmsTracker(map, sentIntent,
-                deliveryIntent);
         int ss = mPhone.getServiceState().getState();
 
-        if (ss != ServiceState.STATE_IN_SERVICE) {
+        // if IMS not registered on data and voice is not available...
+        if (!isIms() && ss != ServiceState.STATE_IN_SERVICE) {
             handleNotInService(ss, tracker);
         } else {
             String appName = getAppNameByIntent(sentIntent);
             if (mUsageMonitor.check(appName, SINGLE_PART_SMS)) {
-                sendSms(tracker);
+                if (mSyncronousSending) {
+                    enqueueMessageForSending(tracker);
+                } else {
+                    sendSms(tracker);
+                }
             } else {
                 sendMessage(obtainMessage(EVENT_POST_ALERT, tracker));
             }
@@ -915,7 +1047,8 @@ public abstract class SMSDispatcher extends Handler {
         if (mSTrackers.size() >= MO_MSG_QUEUE_LIMIT) {
             // Deny the sending when the queue limit is reached.
             try {
-                tracker.mSentIntent.send(RESULT_ERROR_LIMIT_EXCEEDED);
+                if (tracker.mSentIntent != null)
+                    tracker.mSentIntent.send(RESULT_ERROR_LIMIT_EXCEEDED);
             } catch (CanceledException ex) {
                 Log.e(TAG, "failed to send back RESULT_ERROR_LIMIT_EXCEEDED");
             }
@@ -955,6 +1088,13 @@ public abstract class SMSDispatcher extends Handler {
     protected abstract void sendSms(SmsTracker tracker);
 
     /**
+     * Retry the message along to the radio.
+     *
+     * @param tracker holds the SMS message to send
+     */
+    protected abstract void sendRetrySms(SmsTracker tracker);
+
+    /**
      * Send the multi-part SMS based on multipart Sms tracker
      *
      * @param tracker holds the multipart Sms tracker ready to be sent
@@ -975,13 +1115,16 @@ public abstract class SMSDispatcher extends Handler {
 
         // check if in service
         int ss = mPhone.getServiceState().getState();
-        if (ss != ServiceState.STATE_IN_SERVICE) {
+        // if IMS not registered on data and voice is not available...
+        if (!isIms() && ss != ServiceState.STATE_IN_SERVICE) {
             for (int i = 0, count = parts.size(); i < count; i++) {
                 PendingIntent sentIntent = null;
                 if (sentIntents != null && sentIntents.size() > i) {
                     sentIntent = sentIntents.get(i);
                 }
-                handleNotInService(ss, new SmsTracker(null, sentIntent, null));
+                SmsTracker newTracker = SmsTrackerFactory(null, sentIntent, null,
+                        getFormat());
+                handleNotInService(ss, newTracker);
             }
             return;
         }
@@ -1026,17 +1169,22 @@ public abstract class SMSDispatcher extends Handler {
         // fields need to be public for derived SmsDispatchers
         public final HashMap<String, Object> mData;
         public int mRetryCount;
+        public int mImsRetry; // nonzero indicates initial message was sent over Ims
         public int mMessageRef;
+        String mFormat;
 
         public final PendingIntent mSentIntent;
         public final PendingIntent mDeliveryIntent;
 
-        public SmsTracker(HashMap<String, Object> data, PendingIntent sentIntent,
-                PendingIntent deliveryIntent) {
+        private SmsTracker(HashMap data, PendingIntent sentIntent,
+                PendingIntent deliveryIntent, String format) {
             mData = data;
             mSentIntent = sentIntent;
             mDeliveryIntent = deliveryIntent;
             mRetryCount = 0;
+            mFormat = format;
+            mImsRetry = 0;
+            mMessageRef = 0;
         }
 
         /**
@@ -1047,6 +1195,34 @@ public abstract class SMSDispatcher extends Handler {
             HashMap map = mData;
             return map.containsKey("parts");
         }
+    }
+
+    protected SmsTracker SmsTrackerFactory(HashMap data, PendingIntent sentIntent,
+            PendingIntent deliveryIntent, String format) {
+        return new SmsTracker(data, sentIntent, deliveryIntent, format);
+    }
+
+    protected HashMap SmsTrackerMapFactory(String destAddr, String scAddr,
+            String text, SmsMessageBase.SubmitPduBase pdu) {
+        HashMap<String, Object> map = new HashMap<String, Object>();
+        map.put("destAddr", destAddr);
+        map.put("scAddr", scAddr);
+        map.put("text", text);
+        map.put("smsc", pdu.encodedScAddress);
+        map.put("pdu", pdu.encodedMessage);
+        return map;
+    }
+
+    protected HashMap SmsTrackerMapFactory(String destAddr, String scAddr,
+            int destPort, byte[] data, SmsMessageBase.SubmitPduBase pdu) {
+        HashMap<String, Object> map = new HashMap<String, Object>();
+        map.put("destAddr", destAddr);
+        map.put("scAddr", scAddr);
+        map.put("destPort", Integer.valueOf(destPort));
+        map.put("data", data);
+        map.put("smsc", pdu.encodedScAddress);
+        map.put("pdu", pdu.encodedMessage);
+        return map;
     }
 
     private final DialogInterface.OnClickListener mListener =
@@ -1066,29 +1242,98 @@ public abstract class SMSDispatcher extends Handler {
     private final BroadcastReceiver mResultReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            // Assume the intent is one of the SMS receive intents that
-            // was sent as an ordered broadcast.  Check result and ACK.
-            int rc = getResultCode();
-            boolean success = (rc == Activity.RESULT_OK)
-                    || (rc == Intents.RESULT_SMS_HANDLED);
+            if (intent.getAction().equals(Intents.SMS_CB_RECEIVED_ACTION) ||
+                    intent.getAction().equals(Intents.SMS_EMERGENCY_CB_RECEIVED_ACTION)) {
+                // Ignore this intent. Apps will process it.
+            } else {
+                // Assume the intent is one of the SMS receive intents that
+                // was sent as an ordered broadcast. Check result and ACK.
+                int rc = getResultCode();
+                boolean success = (rc == Activity.RESULT_OK) || (rc == Intents.RESULT_SMS_HANDLED);
 
-            // For a multi-part message, this only ACKs the last part.
-            // Previous parts were ACK'd as they were received.
-            acknowledgeLastIncomingSms(success, rc, null);
+                // For a multi-part message, this only ACKs the last part.
+                // Previous parts were ACK'd as they were received.
+                acknowledgeLastIncomingSms(success, rc, null);
+            }
         }
     };
 
-    protected void dispatchBroadcastPdus(byte[][] pdus, boolean isEmergencyMessage) {
-        if (isEmergencyMessage) {
-            Intent intent = new Intent(Intents.SMS_EMERGENCY_CB_RECEIVED_ACTION);
-            intent.putExtra("pdus", pdus);
-            Log.d(TAG, "Dispatching " + pdus.length + " emergency SMS CB pdus");
-            dispatch(intent, RECEIVE_EMERGENCY_BROADCAST_PERMISSION);
-        } else {
-            Intent intent = new Intent(Intents.SMS_CB_RECEIVED_ACTION);
-            intent.putExtra("pdus", pdus);
-            Log.d(TAG, "Dispatching " + pdus.length + " SMS CB pdus");
-            dispatch(intent, RECEIVE_SMS_PERMISSION);
+    private void processNextPendingMessage() {
+        synchronized (mPendingMessagesList) {
+            // Remove sent message from the list
+            if (mPendingMessagesList.size() > 0) {
+                mPendingMessagesList.remove(0);
+                Log.d(TAG, "Removed message from pending queue. " + mPendingMessagesList.size() + " left");
+            } else {
+                Log.e(TAG, "Pending messages list consistency failure detected!");
+            }
+
+            // If there are more messages waiting to be sent - send next one
+            if (mPendingMessagesList.size() > 0) {
+                sendSms(mPendingMessagesList.get(0));
+            }
         }
+    }
+
+    private void enqueueMessageForSending(SmsTracker tracker) {
+        synchronized (mPendingMessagesList) {
+            mPendingMessagesList.add(tracker);
+            Log.d(TAG, "Added message to the pending queue. Queue size is " + mPendingMessagesList.size());
+            //Trigger sending only if there are no other messages being sent right now
+            //i.e. the queue was empty before we added this message to it
+            if (mPendingMessagesList.size() == 1) {
+                sendSms(tracker);
+            }
+        }
+    }
+
+    protected void storeVoiceMailCount() {
+        // Store the voice mail count in persistent memory.
+        String imsi = mPhone.getSubscriberId();
+        int mwi = mPhone.getVoiceMessageCount();
+
+        Log.d(TAG, " Storing Voice Mail Count = " + mwi
+                    + " for imsi = " + imsi
+                    + " for mVmCountKey = " + ((PhoneBase)mPhone).mVmCountKey
+                    + " vmId = " + ((PhoneBase)mPhone).mVmId
+                    + " in preferences.");
+
+        SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mContext);
+        SharedPreferences.Editor editor = sp.edit();
+        editor.putInt(((PhoneBase)mPhone).mVmCountKey, mwi);
+        editor.putString(((PhoneBase)mPhone).mVmId, imsi);
+        editor.commit();
+
+    }
+
+    static public boolean isIms() {
+        return mIms;
+    }
+
+    static public boolean isImsSmsEncodingCdma() {
+        return mImsSmsEncoding.isCdma();
+    }
+
+    /**
+     * Determines whether or not to use CDMA encoding for MO SMS.
+     *
+     * @return true if Cdma encoding should be used for MO SMS, false otherwise.
+     */
+    protected boolean isCdmaMo() {
+        if (!isIms()) {
+            // IMS is not registered, use Voice technology to determine SMS encoding.
+            return (Phone.PHONE_TYPE_CDMA == mPhone.getPhoneType());
+        }
+        // IMS is registered
+        return isImsSmsEncodingCdma();
+    }
+
+    protected abstract void updateIccAvailability();
+
+    IccFileHandler getIccFileHandler() {
+        if (mUiccApplication != null) {
+            return mUiccApplication.getIccFileHandler();
+        }
+        return null;
     }
 }

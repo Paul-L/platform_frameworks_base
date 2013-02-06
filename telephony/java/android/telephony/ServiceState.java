@@ -16,6 +16,8 @@
 
 package android.telephony;
 
+import com.android.internal.telephony.cdma.EriInfo;
+
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -97,6 +99,11 @@ public class ServiceState implements Parcelable {
     public static final int RADIO_TECHNOLOGY_LTE = 14;
     /** @hide */
     public static final int RADIO_TECHNOLOGY_HSPAP = 15;
+    /**
+     * GSM radio technology only supports voice. It does not support data.
+     * @hide
+     */
+    public static final int RADIO_TECHNOLOGY_GSM = 16;
 
     /**
      * Available registration states for GSM, UMTS and CDMA.
@@ -115,6 +122,7 @@ public class ServiceState implements Parcelable {
     public static final int REGISTRATION_STATE_ROAMING = 5;
 
     private int mState = STATE_OUT_OF_SERVICE;
+    private int mDataState = STATE_OUT_OF_SERVICE;
     private boolean mRoaming;
     private String mOperatorAlphaLong;
     private String mOperatorAlphaShort;
@@ -130,7 +138,7 @@ public class ServiceState implements Parcelable {
     private int mSystemId;
     private int mCdmaRoamingIndicator;
     private int mCdmaDefaultRoamingIndicator;
-    private int mCdmaEriIconIndex;
+    private int mCdmaEriIconIndex = EriInfo.ROAMING_INDICATOR_OFF;
     private int mCdmaEriIconMode;
 
     /**
@@ -181,6 +189,7 @@ public class ServiceState implements Parcelable {
         mCdmaEriIconIndex = s.mCdmaEriIconIndex;
         mCdmaEriIconMode = s.mCdmaEriIconMode;
         mIsEmergencyOnly = s.mIsEmergencyOnly;
+        mDataState = s.mDataState;
     }
 
     /**
@@ -202,6 +211,7 @@ public class ServiceState implements Parcelable {
         mCdmaEriIconIndex = in.readInt();
         mCdmaEriIconMode = in.readInt();
         mIsEmergencyOnly = in.readInt() != 0;
+        mDataState = in.readInt();
     }
 
     public void writeToParcel(Parcel out, int flags) {
@@ -220,6 +230,7 @@ public class ServiceState implements Parcelable {
         out.writeInt(mCdmaEriIconIndex);
         out.writeInt(mCdmaEriIconMode);
         out.writeInt(mIsEmergencyOnly ? 1 : 0);
+        out.writeInt(mDataState);
     }
 
     public int describeContents() {
@@ -247,6 +258,19 @@ public class ServiceState implements Parcelable {
      */
     public int getState() {
         return mState;
+    }
+
+    /**
+     * Get current data service state of phone
+     *
+     * @see #STATE_IN_SERVICE
+     * @see #STATE_OUT_OF_SERVICE
+     * @see #STATE_EMERGENCY_ONLY
+     * @see #STATE_POWER_OFF
+     * @hide
+     */
+    public int getDataState() {
+        return mDataState;
     }
 
     /**
@@ -384,7 +408,8 @@ public class ServiceState implements Parcelable {
                 && equalsHandlesNulls(mCdmaRoamingIndicator, s.mCdmaRoamingIndicator)
                 && equalsHandlesNulls(mCdmaDefaultRoamingIndicator,
                         s.mCdmaDefaultRoamingIndicator)
-                && mIsEmergencyOnly == s.mIsEmergencyOnly);
+                && mIsEmergencyOnly == s.mIsEmergencyOnly
+                && mDataState== s.mDataState);
     }
 
     /**
@@ -447,6 +472,9 @@ public class ServiceState implements Parcelable {
             case 15:
                 rtString = "HSPAP";
                 break;
+            case 16:
+                rtString = "GSM";
+                break;
             default:
                 rtString = "Unexpected";
                 Log.w(LOG_TAG, "Unexpected radioTechnology=" + rt);
@@ -468,6 +496,7 @@ public class ServiceState implements Parcelable {
                 + " " + (mCssIndicator ? "CSS supported" : "CSS not supported")
                 + " " + mNetworkId
                 + " " + mSystemId
+                + " mDataState=" + mDataState
                 + " RoamInd=" + mCdmaRoamingIndicator
                 + " DefRoamInd=" + mCdmaDefaultRoamingIndicator
                 + " EmergOnly=" + mIsEmergencyOnly);
@@ -475,6 +504,7 @@ public class ServiceState implements Parcelable {
 
     private void setNullState(int state) {
         mState = state;
+        mDataState = state;
         mRoaming = false;
         mOperatorAlphaLong = null;
         mOperatorAlphaShort = null;
@@ -501,6 +531,11 @@ public class ServiceState implements Parcelable {
 
     public void setState(int state) {
         mState = state;
+    }
+
+    /** @hide */
+    public void setDataState(int dataState) {
+        mDataState = dataState;
     }
 
     public void setRoaming(boolean roaming) {
@@ -653,5 +688,29 @@ public class ServiceState implements Parcelable {
     /** @hide */
     public int getSystemId() {
         return this.mSystemId;
+    }
+
+    /** @hide */
+    public static boolean isGsm(int radioTechnology) {
+        return radioTechnology == RADIO_TECHNOLOGY_GPRS
+                || radioTechnology == RADIO_TECHNOLOGY_EDGE
+                || radioTechnology == RADIO_TECHNOLOGY_UMTS
+                || radioTechnology == RADIO_TECHNOLOGY_HSDPA
+                || radioTechnology == RADIO_TECHNOLOGY_HSUPA
+                || radioTechnology == RADIO_TECHNOLOGY_HSPA
+                || radioTechnology == RADIO_TECHNOLOGY_LTE
+                || radioTechnology == RADIO_TECHNOLOGY_HSPAP
+                || radioTechnology == RADIO_TECHNOLOGY_GSM;
+    }
+
+    /** @hide */
+    public static boolean isCdma(int radioTechnology) {
+        return radioTechnology == RADIO_TECHNOLOGY_IS95A
+                || radioTechnology == RADIO_TECHNOLOGY_IS95B
+                || radioTechnology == RADIO_TECHNOLOGY_1xRTT
+                || radioTechnology == RADIO_TECHNOLOGY_EVDO_0
+                || radioTechnology == RADIO_TECHNOLOGY_EVDO_A
+                || radioTechnology == RADIO_TECHNOLOGY_EVDO_B
+                || radioTechnology == RADIO_TECHNOLOGY_EHRPD;
     }
 }

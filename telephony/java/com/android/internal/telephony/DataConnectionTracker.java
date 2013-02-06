@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (c) 2011-2012 Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +40,7 @@ import android.os.SystemProperties;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.provider.Settings.SettingNotFoundException;
+import android.provider.Telephony;
 import android.telephony.ServiceState;
 import android.text.TextUtils;
 import android.util.Log;
@@ -47,9 +49,16 @@ import com.android.internal.R;
 import com.android.internal.telephony.DataConnection.FailCause;
 import com.android.internal.util.AsyncChannel;
 import com.android.internal.util.Protocol;
-
+import com.android.internal.telephony.DataProfile;
+import com.android.internal.telephony.QosSpec;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -121,7 +130,7 @@ public abstract class DataConnectionTracker extends Handler {
     protected static final int EVENT_DO_RECOVERY = BASE + 18;
     protected static final int EVENT_APN_CHANGED = BASE + 19;
     protected static final int EVENT_CDMA_DATA_DETACHED = BASE + 20;
-    protected static final int EVENT_NV_READY = BASE + 21;
+    protected static final int EVENT_CDMA_SUBSCRIPTION_SOURCE_CHANGED = BASE + 21;
     protected static final int EVENT_PS_RESTRICT_ENABLED = BASE + 22;
     protected static final int EVENT_PS_RESTRICT_DISABLED = BASE + 23;
     public static final int EVENT_CLEAN_UP_CONNECTION = BASE + 24;
@@ -133,6 +142,12 @@ public abstract class DataConnectionTracker extends Handler {
     public static final int EVENT_CLEAN_UP_ALL_CONNECTIONS = BASE + 30;
     public static final int CMD_SET_DEPENDENCY_MET = BASE + 31;
     public static final int CMD_SET_POLICY_DATA_ENABLE = BASE + 32;
+    protected static final int EVENT_ICC_CHANGED = BASE + 33;
+    protected static final int EVENT_TETHERED_MODE_STATE_CHANGED = BASE + 34;
+    protected static final int EVENT_READ_MODEM_PROFILES = BASE + 35;
+    protected static final int EVENT_GET_DATA_CALL_PROFILE_DONE = BASE + 36;
+    protected static final int EVENT_MODEM_DATA_PROFILE_READY = BASE + 37;
+    protected static final int EVENT_RAT_CHANGED = BASE + 38;
 
     /***** Constants *****/
 
@@ -149,6 +164,14 @@ public abstract class DataConnectionTracker extends Handler {
 
     public static final int DISABLED = 0;
     public static final int ENABLED = 1;
+
+    /**
+     * Constants for the data connection activity:
+     * physical link down/up
+     */
+    protected static final int DATA_CONNECTION_ACTIVE_PH_LINK_INACTIVE = 0;
+    protected static final int DATA_CONNECTION_ACTIVE_PH_LINK_DOWN = 1;
+    protected static final int DATA_CONNECTION_ACTIVE_PH_LINK_UP = 2;
 
     public static final String APN_TYPE_KEY = "apnType";
 
@@ -174,6 +197,8 @@ public abstract class DataConnectionTracker extends Handler {
     private boolean[] dataEnabled = new boolean[APN_NUM_TYPES];
 
     private int enabledCount = 0;
+
+    private int mTetheredMode = RILConstants.RIL_TETHERED_MODE_OFF;
 
     /* Currently requested APN type (TODO: This should probably be a parameter not a member) */
     protected String mRequestedApnType = Phone.APN_TYPE_DEFAULT;
@@ -244,10 +269,10 @@ public abstract class DataConnectionTracker extends Handler {
 
     // member variables
     protected PhoneBase mPhone;
+    protected UiccManager mUiccManager;
+    protected IccRecords mIccRecords;
     protected Activity mActivity = Activity.NONE;
     protected State mState = State.IDLE;
-    protected Handler mDataConnectionTracker = null;
-
 
     protected long mTxPkts;
     protected long mRxPkts;
@@ -299,20 +324,60 @@ public abstract class DataConnectionTracker extends Handler {
     /** Phone.APN_TYPE_* ===> ApnContext */
     protected ConcurrentHashMap<String, ApnContext> mApnContexts;
 
+    /** Priorities for APN_TYPEs. package level access, used by ApnContext */
+    static LinkedHashMap<String, Integer> mApnPriorities =
+        new LinkedHashMap<String, Integer>() {
+            {
+                put(Phone.APN_TYPE_CBS,     7);
+                put(Phone.APN_TYPE_IMS,     6);
+                put(Phone.APN_TYPE_FOTA,    5);
+                put(Phone.APN_TYPE_HIPRI,   4);
+                put(Phone.APN_TYPE_DUN,     3);
+                put(Phone.APN_TYPE_SUPL,    2);
+                put(Phone.APN_TYPE_MMS,     1);
+                put(Phone.APN_TYPE_DEFAULT, 0);
+            }
+        };
+
     /* Currently active APN */
-    protected ApnSetting mActiveApn;
+    protected DataProfile mActiveApn;
 
     /** allApns holds all apns */
-    protected ArrayList<ApnSetting> mAllApns = null;
+    protected ArrayList<DataProfile> mAllApns = null;
 
     /** preferred apn */
-    protected ApnSetting mPreferredApn = null;
+    protected DataProfile mPreferredApn = null;
 
     /** Is packet service restricted by network */
     protected boolean mIsPsRestricted = false;
 
     /* Once disposed dont handle any messages */
     protected boolean mIsDisposed = false;
+
+    // Flags introduced for FMC (fixed mobile convergence) to trigger
+    // data call even when there is no service on mobile networks.
+    protected boolean mCheckForConnectivity = true;
+    protected boolean mCheckForSubscription = true;
+
+    /** Watches for changes to the APN db. */
+    private ApnChangeObserver mApnObserver;
+
+    /**
+     * Handles changes to the APN db.
+     */
+    private class ApnChangeObserver extends ContentObserver {
+        public ApnChangeObserver (Handler h) {
+            super(h);
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            sendMessage(obtainMessage(EVENT_APN_CHANGED));
+        }
+    }
+
+    // Handles changes in Profiles database
+    protected abstract void onApnChanged();
 
     protected BroadcastReceiver mIntentReceiver = new BroadcastReceiver ()
     {
@@ -478,7 +543,11 @@ public abstract class DataConnectionTracker extends Handler {
             msg.obj = reason;
             sendMessage(msg);
         }
-        sendMessage(obtainMessage(EVENT_TRY_SETUP_DATA));
+
+        int partialRetry = 0;
+        if (reason != null && reason.equals(Phone.REASON_DUALIP_PARTIAL_FAILURE_RETRY))
+            partialRetry = Phone.DUALIP_PARTIAL_RETRY;
+        sendMessage(obtainMessage(EVENT_TRY_SETUP_DATA, partialRetry, 0, null));
     }
 
     protected void onActionIntentDataStallAlarm(Intent intent) {
@@ -494,6 +563,11 @@ public abstract class DataConnectionTracker extends Handler {
     protected DataConnectionTracker(PhoneBase phone) {
         super();
         mPhone = phone;
+        mUiccManager = UiccManager.getInstance();
+        mUiccManager.registerForIccChanged(this, EVENT_ICC_CHANGED, null);
+
+        mPhone.mCM.registerForTetheredModeStateChanged(this,
+                EVENT_TETHERED_MODE_STATE_CHANGED, null);
 
         IntentFilter filter = new IntentFilter();
         filter.addAction(getActionIntentReconnectAlarm());
@@ -525,6 +599,10 @@ public abstract class DataConnectionTracker extends Handler {
         // watch for changes to Settings.Secure.DATA_ROAMING
         mDataRoamingSettingObserver = new DataRoamingSettingObserver(mPhone);
         mDataRoamingSettingObserver.register(mPhone.getContext());
+
+        mApnObserver = new ApnChangeObserver(this);
+        mPhone.getContext().getContentResolver().registerContentObserver(
+                Telephony.Carriers.CONTENT_URI, true, mApnObserver);
     }
 
     public void dispose() {
@@ -535,6 +613,9 @@ public abstract class DataConnectionTracker extends Handler {
         mIsDisposed = true;
         mPhone.getContext().unregisterReceiver(this.mIntentReceiver);
         mDataRoamingSettingObserver.unregister(mPhone.getContext());
+        mUiccManager.unregisterForIccChanged(this);
+        mPhone.mCM.unregisterForTetheredModeStateChanged(this);
+        mPhone.getContext().getContentResolver().unregisterContentObserver(this.mApnObserver);
     }
 
     protected void broadcastMessenger() {
@@ -550,23 +631,12 @@ public abstract class DataConnectionTracker extends Handler {
     public boolean isApnTypeActive(String type) {
         // TODO: support simultaneous with List instead
         if (Phone.APN_TYPE_DUN.equals(type)) {
-            ApnSetting dunApn = fetchDunApn();
+            DataProfile dunApn = fetchDunApn();
             if (dunApn != null) {
-                return ((mActiveApn != null) && (dunApn.toString().equals(mActiveApn.toString())));
+                return ((mActiveApn != null) && (dunApn.toHash().equals(mActiveApn.toHash())));
             }
         }
         return mActiveApn != null && mActiveApn.canHandleType(type);
-    }
-
-    protected ApnSetting fetchDunApn() {
-        Context c = mPhone.getContext();
-        String apnData = Settings.Secure.getString(c.getContentResolver(),
-                Settings.Secure.TETHER_DUN_APN);
-        ApnSetting dunSetting = ApnSetting.fromString(apnData);
-        if (dunSetting != null) return dunSetting;
-
-        apnData = c.getResources().getString(R.string.config_tether_apndata);
-        return ApnSetting.fromString(apnData);
     }
 
     public String[] getActiveApnTypes() {
@@ -636,7 +706,8 @@ public abstract class DataConnectionTracker extends Handler {
     protected abstract void setState(State s);
     protected abstract void gotoIdleAndNotifyDataConnection(String reason);
 
-    protected abstract boolean onTrySetupData(String reason);
+    protected abstract DataConnection getActiveDataConnection(String type);
+    protected abstract boolean onTrySetupData(String reason, boolean isPartialRetry);
     protected abstract void onRoamingOff();
     protected abstract void onRoamingOn();
     protected abstract void onRadioAvailable();
@@ -648,6 +719,15 @@ public abstract class DataConnectionTracker extends Handler {
     protected abstract void onCleanUpConnection(boolean tearDown, int apnId, String reason);
     protected abstract void onCleanUpAllConnections(String cause);
     protected abstract boolean isDataPossible(String apnType);
+    protected abstract void updateIccAvailability();
+    protected abstract DataProfile fetchDunApn();
+    /* If multiple calls (mms, supl etc) cannot be supported at the same time
+     * (e.g: MPDN not supported), disconnect a lower priority call
+     */
+    protected abstract boolean disconnectOneLowerPriorityCall(String apnType);
+    protected abstract void setDataReadinessChecks(
+            boolean checkConnectivity, boolean checkSubscription, boolean tryDataCalls);
+    protected abstract void clearTetheredStateOnStatus();
 
     protected void onDataStallAlarm(int tag) {
         loge("onDataStallAlarm: not impleted tag=" + tag);
@@ -672,7 +752,7 @@ public abstract class DataConnectionTracker extends Handler {
                 if (msg.obj instanceof String) {
                     reason = (String) msg.obj;
                 }
-                onTrySetupData(reason);
+                onTrySetupData(reason, false);
                 break;
 
             case EVENT_DATA_STALL_ALARM:
@@ -758,6 +838,15 @@ public abstract class DataConnectionTracker extends Handler {
                 onSetPolicyDataEnabled(enabled);
                 break;
             }
+            case EVENT_ICC_CHANGED:
+                updateIccAvailability();
+                break;
+            case EVENT_TETHERED_MODE_STATE_CHANGED:
+                onTetheredModeStateChanged((AsyncResult) msg.obj);
+                break;
+            case EVENT_APN_CHANGED:
+                onApnChanged();
+                break;
             default:
                 Log.e("DATA", "Unidentified event msg=" + msg);
                 break;
@@ -1076,6 +1165,94 @@ public abstract class DataConnectionTracker extends Handler {
         gotoIdleAndNotifyDataConnection(reason);
     }
 
+    public int enableQos(QosSpec qosSpec, String type) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+
+        log("enableQos: type:" + type +
+                " userData:" + qosSpec.getUserData());
+
+        DataConnection dc = getActiveDataConnection(type);
+
+        if (dc != null) {
+            dc.qosSetup(qosSpec);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        } else {
+            log("enableQos: Did not find a data connection!");
+        }
+
+        return result;
+    }
+
+    public int disableQos(int qosId) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+        log("disableQos:" + qosId);
+
+        DataConnection dc = getDataConnectionByQosId(qosId);
+        if (dc != null) {
+            dc.qosRelease(qosId);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        }
+        return result;
+    }
+
+    public int modifyQos(int qosId, QosSpec qosSpec) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+        log("modifyQos:" + qosId);
+
+        DataConnection dc = getDataConnectionByQosId(qosId);
+        if (dc != null) {
+            dc.qosModify(qosId, qosSpec);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        }
+        return result;
+    }
+
+    public int suspendQos(int qosId) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+        log("suspendQos:" + qosId);
+
+        DataConnection dc = getDataConnectionByQosId(qosId);
+        if (dc != null) {
+            dc.qosSuspend(qosId);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        }
+        return result;
+    }
+
+    public int resumeQos(int qosId) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+        log("resumeQos:" + qosId);
+
+        DataConnection dc = getDataConnectionByQosId(qosId);
+        if (dc != null) {
+            dc.qosResume(qosId);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        }
+        return result;
+    }
+
+    public int getQosStatus(int qosId) {
+        int result = Phone.QOS_REQUEST_FAILURE;
+        log("getQosStatus:" + qosId);
+
+        DataConnection dc = getDataConnectionByQosId(qosId);
+        if (dc != null) {
+            dc.getQosStatus(qosId);
+            result = Phone.QOS_REQUEST_SUCCESS;
+        }
+        return result;
+    }
+
+    private DataConnection getDataConnectionByQosId(int qosId) {
+        for (Integer dcKey : mDataConnections.keySet()) {
+            DataConnection dc = mDataConnections.get(dcKey);
+            if (dc.isValidQos(qosId)) {
+                return dc;
+            }
+        }
+        return null;
+    }
+
     /**
      * Prevent mobile data connections from being established, or once again
      * allow mobile data connections. If the state toggles, then either tear
@@ -1101,7 +1278,7 @@ public abstract class DataConnectionTracker extends Handler {
             if (enabled) {
                 log("onSetInternalDataEnabled: changed to enabled, try to setup data call");
                 resetAllRetryCounts();
-                onTrySetupData(Phone.REASON_DATA_ENABLED);
+                onTrySetupData(Phone.REASON_DATA_ENABLED, false);
             } else {
                 log("onSetInternalDataEnabled: changed to disabled, cleanUpAllConnections");
                 cleanUpAllConnections(null);
@@ -1127,7 +1304,7 @@ public abstract class DataConnectionTracker extends Handler {
                 if (prevEnabled != getAnyDataEnabled()) {
                     if (!prevEnabled) {
                         resetAllRetryCounts();
-                        onTrySetupData(Phone.REASON_DATA_ENABLED);
+                        onTrySetupData(Phone.REASON_DATA_ENABLED, false);
                     } else {
                         onCleanUpAllConnections(Phone.REASON_DATA_DISABLED);
                     }
@@ -1147,13 +1324,32 @@ public abstract class DataConnectionTracker extends Handler {
                 if (prevEnabled != getAnyDataEnabled()) {
                     if (!prevEnabled) {
                         resetAllRetryCounts();
-                        onTrySetupData(Phone.REASON_DATA_ENABLED);
+                        onTrySetupData(Phone.REASON_DATA_ENABLED, false);
                     } else {
                         onCleanUpAllConnections(Phone.REASON_DATA_DISABLED);
                     }
                 }
             }
         }
+    }
+
+    /* Return the list of ApnContexts based on their priorities */
+    protected List<ApnContext> getPrioritySortedApnContextList() {
+
+        ArrayList<ApnContext> sortedList = new ArrayList<ApnContext>();
+
+        /*
+         *  Get the prioritized enumerated APN Types and retrieve the APN
+         *  context associated with it from the list of APN contexts
+         */
+        Iterator apnTypes = mApnPriorities.keySet().iterator();
+        while(apnTypes.hasNext()) {
+            ApnContext apnContext = mApnContexts.get(apnTypes.next());
+            if (apnContext != null)
+                sortedList.add(apnContext);
+        }
+
+        return sortedList;
     }
 
     protected String getReryConfig(boolean forDefault) {
@@ -1178,9 +1374,66 @@ public abstract class DataConnectionTracker extends Handler {
         }
     }
 
+    private void onTetheredModeStateChanged(AsyncResult ar) {
+        int[] ret = (int[]) ar.result;
+
+        if (ret == null || ret.length != 1) {
+            if (DBG)
+                log("Error: Invalid Tethered mode received");
+            return;
+        }
+
+        int mode = ret[0];
+        if (DBG)
+            log("onTetheredModeStateChanged: mode:" + mode);
+
+        if (mTetheredMode == mode) {
+            if (DBG) log("Ignoring duplicate tethered mode change notification");
+            return;
+        }
+
+        mTetheredMode = mode;
+
+        switch (mode) {
+        case RILConstants.RIL_TETHERED_MODE_ON:
+            // Indicates that an internal data call was created in the modem.
+            if (DBG)
+                log("Unsol Indication: RIL_TETHERED_MODE_ON");
+            break;
+        case RILConstants.RIL_TETHERED_MODE_OFF:
+            if (DBG)
+                log("Unsol Indication: RIL_TETHERED_MODE_OFF");
+            /*
+             * This indicates that an internal modem data call (e.g. tethered)
+             * had ended. Reset the retry count for all Data Connections and
+             * attempt to bring up all data calls
+             */
+            resetAllRetryCounts();
+            clearTetheredStateOnStatus();
+            sendMessage(obtainMessage(EVENT_TRY_SETUP_DATA, 0, 0,
+                    Phone.REASON_TETHERED_MODE_STATE_CHANGED));
+            break;
+        default:
+            if (DBG)
+            log("Error: Invalid Tethered mode:" + mode);
+        }
+    }
+
     protected void resetAllRetryCounts() {
         for (DataConnection dc : mDataConnections.values()) {
             dc.resetRetryCount();
         }
+    }
+
+    public boolean checkForConnectivity() {
+        return mCheckForConnectivity;
+    }
+
+    public boolean checkForSubscription() {
+        return mCheckForSubscription;
+    }
+
+    public IccRecords getIccRecords() {
+        return mIccRecords;
     }
 }

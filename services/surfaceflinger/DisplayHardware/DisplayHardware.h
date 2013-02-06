@@ -47,10 +47,8 @@ public:
         PARTIAL_UPDATES             = 0x00020000,   // video driver feature
         SLOW_CONFIG                 = 0x00040000,   // software
         SWAP_RECTANGLE              = 0x00080000,
-#ifdef QCOM_HARDWARE
         C2D_COMPOSITION             = 0x00100000,   // C2D composition
         MDP_COMPOSITION             = 0x00200000    // MDP composition
-#endif
     };
 
     DisplayHardware(
@@ -80,9 +78,7 @@ public:
 
     uint32_t getPageFlipCount() const;
     EGLDisplay getEGLDisplay() const { return mDisplay; }
-#ifdef QCOM_HARDWARE
     EGLDisplay getEGLSurface() const { return mSurface; }
-#endif
 
     void dump(String8& res) const;
 
@@ -98,6 +94,7 @@ public:
 
     // only for debugging
     int getCurrentBufferIndex() const;
+    void perform(int, int) const;
 
 private:
     void init(uint32_t displayIndex) __attribute__((noinline));

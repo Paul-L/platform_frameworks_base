@@ -181,7 +181,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 ################################################################################
 
-ifeq ($(TARGET_USES_QCOM_LPA),true)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
@@ -335,4 +334,4 @@ LOCAL_C_INCLUDES := frameworks/base/media/libstagefright/include
 LOCAL_MODULE := libstagefright_aacdec
 
 include $(BUILD_STATIC_LIBRARY)
-endif
+
