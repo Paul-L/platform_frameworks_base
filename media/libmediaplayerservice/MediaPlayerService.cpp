@@ -1270,7 +1270,9 @@ MediaPlayerService::AudioOutput::AudioOutput(int sessionId)
       mSessionId(sessionId) {
     LOGV("AudioOutput(%d)", sessionId);
     mTrack = 0;
+#ifdef WITH_QCOM_LPA
     mSession = 0;
+#endif
     mStreamType = AUDIO_STREAM_MUSIC;
     mLeftVolume = 1.0;
     mRightVolume = 1.0;
@@ -1283,7 +1285,9 @@ MediaPlayerService::AudioOutput::AudioOutput(int sessionId)
 MediaPlayerService::AudioOutput::~AudioOutput()
 {
     close();
+#ifdef WITH_QCOM_LPA
     closeSession();
+#endif
 }
 
 void MediaPlayerService::AudioOutput::setMinBufferCount()
@@ -1348,6 +1352,7 @@ status_t MediaPlayerService::AudioOutput::getPosition(uint32_t *position)
     return mTrack->getPosition(position);
 }
 
+#ifdef WITH_QCOM_LPA
 status_t MediaPlayerService::AudioOutput::openSession(
         int format, int lpaSessionId, uint32_t sampleRate, int channels)
 {
@@ -1379,7 +1384,7 @@ status_t MediaPlayerService::AudioOutput::openSession(
     t->setVolume(mLeftVolume, mRightVolume);
     return NO_ERROR;
 }
-
+#endif
 
 status_t MediaPlayerService::AudioOutput::open(
         uint32_t sampleRate, int channelCount, int format, int bufferCount,
@@ -1503,6 +1508,7 @@ void MediaPlayerService::AudioOutput::close()
     }
 }
 
+#ifdef WITH_QCOM_LPA
 void MediaPlayerService::AudioOutput::closeSession()
 {
     LOGV("closeSession");
@@ -1527,17 +1533,24 @@ void MediaPlayerService::AudioOutput::resumeSession()
         mSession->start();
     }
 }
+#endif
 
 void MediaPlayerService::AudioOutput::setVolume(float left, float right)
 {
+#ifdef WITH_QCOM_LPA
     LOGV("setVolume(%f, %f): %p", left, right, mSession);
+#else
+    LOGV("setVolume(%f, %f)", left, right);
+#endif
 
     mLeftVolume = left;
     mRightVolume = right;
     if (mTrack) {
         mTrack->setVolume(left, right);
+#ifdef WITH_QCOM_LPA
     } else if(mSession) {
         mSession->setVolume(left, right);
+#endif
     }
 }
 
