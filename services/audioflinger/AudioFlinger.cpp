@@ -167,8 +167,12 @@ static uint32_t getInputChannelCount(uint32_t channels) {
 
 AudioFlinger::AudioFlinger()
     : BnAudioFlinger(),
-        mPrimaryHardwareDev(0), mLPALeftVol(1.0), mLPARightVol(1.0), mMasterVolume(1.0f), mMasterMute(false), mNextUniqueId(1),
-        mBtNrecIsOff(false), mAllChainsLocked(false)
+        mPrimaryHardwareDev(0),
+#ifdef WITH_QCOM_LPA
+        mLPALeftVol(1.0), mLPARightVol(1.0),
+#endif
+        mMasterVolume(1.0f), mMasterMute(false), mNextUniqueId(1),
+        mBtNrecIsOff(false)
 {
 
 }
@@ -182,6 +186,7 @@ void AudioFlinger::onFirstRef()
     /* TODO: move all this work into an Init() function */
     mHardwareStatus = AUDIO_HW_IDLE;
 
+#ifdef WITH_QCOM_LPA
     mLPAOutput = NULL;
     mLPAHandle = -1;
     mA2DPHandle = -1;
@@ -189,6 +194,7 @@ void AudioFlinger::onFirstRef()
     mLPASessionId = -2; // -2 is invalid session ID
     mIsEffectConfigChanged = false;
     mLPAEffectChain = NULL;
+#endif
 
     for (size_t i = 0; i < ARRAY_SIZE(audio_interfaces); i++) {
         const hw_module_t *mod;
@@ -254,10 +260,12 @@ AudioFlinger::~AudioFlinger()
         // closeOutput() will remove first entry from mPlaybackThreads
         closeOutput(mPlaybackThreads.keyAt(0));
     }
+#ifdef WITH_QCOM_LPA
     if (mLPAOutput) {
         // Close the Output
         closeSession(mLPAHandle);
     }
+#endif
 
     for (int i = 0; i < num_devs; i++) {
         audio_hw_device_t *dev = mAudioHwDevs[i];
@@ -495,6 +503,7 @@ Exit:
     return trackHandle;
 }
 
+#ifdef WITH_QCOM_LPA
 void AudioFlinger::createSession(
         pid_t pid,
         uint32_t sampleRate,
@@ -688,6 +697,7 @@ void AudioFlinger::applyEffectsOn(int16_t *inBuffer, int16_t *outBuffer, int siz
     SRS_Processing::ProcessOut(SRS_Processing::AUTO, this, outBuffer, size, mLPASampleRate, mLPANumChannels);
 #endif
 }
+#endif
 
 uint32_t AudioFlinger::sampleRate(int output) const
 {
@@ -765,7 +775,9 @@ status_t AudioFlinger::setMasterVolume(float value)
         }
         mHardwareStatus = AUDIO_HW_IDLE;
     }
+#ifdef WITH_QCOM_LPA
     mA2DPHandle = -1;
+#endif
     Mutex::Autolock _l(mLock);
     mMasterVolume = value;
     for (uint32_t i = 0; i < mPlaybackThreads.size(); i++)
@@ -865,6 +877,7 @@ bool AudioFlinger::masterMute() const
     return mMasterMute;
 }
 
+#ifdef WITH_QCOM_LPA
 status_t AudioFlinger::setSessionVolume(int stream, float left, float right)
 {
     AutoMutex lock(mLock);
@@ -877,6 +890,7 @@ status_t AudioFlinger::setSessionVolume(int stream, float left, float right)
     }
     return NO_ERROR;
 }
+#endif
 
 status_t AudioFlinger::setStreamVolume(int stream, float value, int output)
 {
@@ -891,22 +905,28 @@ status_t AudioFlinger::setStreamVolume(int stream, float value, int output)
 
     AutoMutex lock(mLock);
 
+#ifdef WITH_QCOM_LPA
     if( (mLPAOutput != NULL) &&
         (mLPAStreamType == stream) ) {
+    mStreamTypes[stream].volume = value;
          mLPAOutput->stream->set_volume(mLPAOutput->stream,mLPALeftVol*value,
                                           mLPARightVol*value);
-         mStreamTypes[stream].volume = value;
     }
+#endif
 
     PlaybackThread *thread = NULL;
     if (output) {
         thread = checkPlaybackThread_l(output);
         if (thread == NULL) {
+#ifndef WITH_QCOM_LPA
+            return BAD_VALUE;
+#else
             if (mLPAOutput == NULL) {
                return BAD_VALUE;
             } else {
                return NO_ERROR;
             }
+#endif
         }
     }
 
@@ -1047,6 +1067,7 @@ status_t AudioFlinger::setParameters(int ioHandle, const String8& keyValuePairs)
         return final_result;
     }
 
+#ifdef WITH_QCOM_LPA
     // Ensure that the routing to LPA is invoked only when the LPA stream is
     // active. Otherwise if there is a input routing request and if there is a
     // Valid LPA handle, routing gets applied for the output descriptor rather
@@ -1056,6 +1077,7 @@ status_t AudioFlinger::setParameters(int ioHandle, const String8& keyValuePairs)
                                                     keyValuePairs.string());
         return result;
     }
+#endif
 
     // hold a strong ref on thread in case closeOutput() or closeInput() is called
     // and the thread is exited once the lock is released
@@ -1177,6 +1199,7 @@ status_t AudioFlinger::getRenderPosition(uint32_t *halFrames, uint32_t *dspFrame
     return BAD_VALUE;
 }
 
+/*
 status_t AudioFlinger::setFmVolume(float value)
 {
     status_t ret = initCheck();
@@ -1196,6 +1219,7 @@ status_t AudioFlinger::setFmVolume(float value)
 
     return ret;
 }
+*/
 
 void AudioFlinger::registerClient(const sp<IAudioFlingerClient>& client)
 {
@@ -1224,13 +1248,16 @@ void AudioFlinger::registerClient(const sp<IAudioFlingerClient>& client)
         }
     }
 
+#ifdef WITH_QCOM_LPA
     // Send the notification to the client only once.
     if (mA2DPHandle != -1) {
         LOGV("A2DP active. Notifying the registered client");
         client->ioConfigChanged(AudioSystem::A2DP_OUTPUT_STATE, mA2DPHandle, NULL);
     }
+#endif
 }
 
+#ifdef WITH_QCOM_LPA
 status_t AudioFlinger::deregisterClient(const sp<IAudioFlingerClient>& client)
 {
     LOGV("deregisterClient() %p, tid %d, calling tid %d", client.get(), gettid(), IPCThreadState::self()->getCallingPid());
@@ -1244,6 +1271,7 @@ status_t AudioFlinger::deregisterClient(const sp<IAudioFlingerClient>& client)
     }
     return false;
 }
+#endif
 
 void AudioFlinger::removeNotificationClient(sp<IBinder> binder)
 {
@@ -1279,10 +1307,12 @@ void AudioFlinger::removeNotificationClient(sp<IBinder> binder)
 // audioConfigChanged_l() must be called with AudioFlinger::mLock held
 void AudioFlinger::audioConfigChanged_l(int event, int ioHandle, void *param2)
 {
+#ifdef WITH_QCOM_LPA
     LOGV("AudioFlinger::audioConfigChanged_l: event %d", event);
     if (event == AudioSystem::EFFECT_CONFIG_CHANGED) {
         mIsEffectConfigChanged = true;
     }
+#endif
     size_t size = mNotificationClients.size();
     for (size_t i = 0; i < size; i++) {
         mNotificationClients.valueAt(i)->client()->ioConfigChanged(event, ioHandle, param2);
@@ -1376,12 +1406,14 @@ status_t AudioFlinger::ThreadBase::setParameters(const String8& keyValuePairs)
     return status;
 }
 
+#ifdef WITH_QCOM_LPA
 void AudioFlinger::ThreadBase::effectConfigChanged() {
     mAudioFlinger->mLock.lock();
     LOGV("New effect is being added to LPA chain, Notifying LPA Player");
     mAudioFlinger->audioConfigChanged_l(AudioSystem::EFFECT_CONFIG_CHANGED, 0, NULL);
     mAudioFlinger->mLock.unlock();
 }
+#endif
 
 void AudioFlinger::ThreadBase::sendConfigEvent(int event, int param)
 {
@@ -2041,13 +2073,17 @@ void AudioFlinger::PlaybackThread::audioConfigChanged_l(int event, int param) {
     default:
         break;
     }
+#ifdef WITH_QCOM_LPA
     if (event != AudioSystem::A2DP_OUTPUT_STATE) {
+#endif
        mAudioFlinger->audioConfigChanged_l(event, mId, param2);
+#ifdef WITH_QCOM_LPA
     }
     else
     {
         mAudioFlinger->audioConfigChanged_l(event, param, NULL);
     }
+#endif
 }
 
 void AudioFlinger::PlaybackThread::readOutputParameters()
@@ -2358,9 +2394,13 @@ bool AudioFlinger::MixerThread::threadLoop()
         // sleepTime == 0 means we must write to audio hardware
         if (sleepTime == 0) {
              for (size_t i = 0; i < effectChains.size(); i ++) {
+#ifdef WITH_QCOM_LPA
                  if (effectChains[i] != mAudioFlinger->mLPAEffectChain) {
+#endif
                      effectChains[i]->process_l();
+#ifdef WITH_QCOM_LPA
                  }
+#endif
              }
              // enable changes in effect chain
              unlockEffectChains(effectChains);
@@ -5436,12 +5476,14 @@ int AudioFlinger::openOutput(uint32_t *pDevices,
         if (pChannels) *pChannels = channels;
         if (pLatencyMs) *pLatencyMs = thread->latency();
 
+#ifdef WITH_QCOM_LPA
         // if the device is a A2DP, then this is an A2DP Output
         if ( true == audio_is_a2dp_device((audio_devices_t) *pDevices) )
         {
             mA2DPHandle = id;
             LOGV("A2DP device activated. The handle is set to %d", mA2DPHandle);
         }
+#endif
         // notify client processes of the new output creation
         thread->audioConfigChanged_l(AudioSystem::OUTPUT_OPENED);
         return id;
@@ -5450,6 +5492,7 @@ int AudioFlinger::openOutput(uint32_t *pDevices,
     return 0;
 }
 
+#ifdef WITH_QCOM_LPA
 int AudioFlinger::openSession(uint32_t *pDevices,
                                    uint32_t *pFormat,
                                    uint32_t flags,
@@ -5536,6 +5579,7 @@ status_t AudioFlinger::closeSession(int output)
 
     return NO_ERROR;
 }
+#endif
 
 int AudioFlinger::openDuplicateOutput(int output1, int output2)
 {
@@ -5583,12 +5627,14 @@ status_t AudioFlinger::closeOutput(int output)
         audioConfigChanged_l(AudioSystem::OUTPUT_CLOSED, output, param2);
         mPlaybackThreads.removeItem(output);
 
+#ifdef WITH_QCOM_LPA
         if (mA2DPHandle == output)
         {
             mA2DPHandle = -1;
             LOGV("A2DP OutputClosed Notifying Client");
             audioConfigChanged_l(AudioSystem::A2DP_OUTPUT_STATE, mA2DPHandle, param2);
         }
+#endif
     }
     thread->exit();
 
@@ -5766,10 +5812,12 @@ status_t AudioFlinger::setStreamOutput(uint32_t stream, int output)
         }
     }
 
+#ifdef WITH_QCOM_LPA
     if ( mA2DPHandle == output ) {
         LOGV("A2DP Activated and hence notifying the client");
         dstThread->sendConfigEvent(AudioSystem::A2DP_OUTPUT_STATE, mA2DPHandle);
     }
+#endif
 
     return NO_ERROR;
 }
@@ -6311,6 +6359,7 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
             addEffectChain_l(chain);
             chain->setStrategy(getStrategyForSession_l(sessionId));
             chainCreated = true;
+#ifdef WITH_QCOM_LPA
             if(sessionId == mAudioFlinger->mLPASessionId) {
                 // Clear reference to previous effect chain if any
                 if(mAudioFlinger->mLPAEffectChain.get()) {
@@ -6324,6 +6373,7 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
                 uint32_t volume = 0x1000000; // Equals to 1.0 in 8.24 format
                 chain->setVolume_l(&volume,&volume);
             }
+#endif
         } else {
             effect = chain->getEffectFromDesc_l(desc);
         }
@@ -6353,9 +6403,11 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::ThreadBase::createEffect_l(
             effect->setDevice(mDevice);
             effect->setMode(mAudioFlinger->getMode());
 
+#ifdef WITH_QCOM_LPA
             if(chain == mAudioFlinger->mLPAEffectChain) {
                 effect->setLPAFlag(true);
             }
+#endif
         }
         // create effect handle and connect it to effect module
         handle = new EffectHandle(effect, client, effectClient, priority);
@@ -6458,13 +6510,11 @@ void AudioFlinger::ThreadBase::lockEffectChains_l(
         Vector<sp <AudioFlinger::EffectChain> >& effectChains)
 {
     effectChains = mEffectChains;
-    mAudioFlinger->mAllChainsLocked = true;
     for (size_t i = 0; i < mEffectChains.size(); i++) {
-        if (mEffectChains[i] != mAudioFlinger->mLPAEffectChain) {
+#ifdef WITH_QCOM_LPA
+        if (mEffectChains[i] != mAudioFlinger->mLPAEffectChain)
+#endif
             mEffectChains[i]->lock();
-        } else {
-            mAudioFlinger-> mAllChainsLocked = false;
-        }
     }
 }
 
@@ -6472,7 +6522,9 @@ void AudioFlinger::ThreadBase::unlockEffectChains(
         Vector<sp <AudioFlinger::EffectChain> >& effectChains)
 {
     for (size_t i = 0; i < effectChains.size(); i++) {
-        if (mAudioFlinger->mAllChainsLocked || mEffectChains[i] != mAudioFlinger->mLPAEffectChain)
+#ifdef WITH_QCOM_LPA
+        if (mEffectChains[i] != mAudioFlinger->mLPAEffectChain)
+#endif
             effectChains[i]->unlock();
     }
 }
@@ -6700,7 +6752,11 @@ AudioFlinger::EffectModule::EffectModule(const wp<ThreadBase>& wThread,
                                         int id,
                                         int sessionId)
     : mThread(wThread), mChain(chain), mId(id), mSessionId(sessionId), mEffectInterface(NULL),
+#ifdef WITH_QCOM_LPA
       mStatus(NO_INIT), mState(IDLE), mSuspended(false), mIsForLPA(false)
+#else
+      mStatus(NO_INIT), mState(IDLE), mSuspended(false)
+#endif
 {
     LOGV("Constructor %p", this);
     int lStatus;
@@ -6836,7 +6892,9 @@ sp<AudioFlinger::EffectHandle> AudioFlinger::EffectModule::controlHandle()
 
 void AudioFlinger::EffectModule::disconnect(const wp<EffectHandle>& handle, bool unpiniflast)
 {
+#ifdef WITH_QCOM_LPA
     setEnabled(false);
+#endif
     LOGV("disconnect() %p handle %p ", this, handle.unsafe_get());
     // keep a strong reference on this EffectModule to avoid calling the
     // destructor before we exit
@@ -6946,9 +7004,11 @@ status_t AudioFlinger::EffectModule::configure(bool isForLPA, int sampleRate, in
 {
     uint32_t channels;
 
+#ifdef WITH_QCOM_LPA
     // Acquire lock here to make sure that any other thread does not delete
     // the effect handle and release the effect module.
     Mutex::Autolock _l(mLock);
+#endif
 
     if (mEffectInterface == NULL) {
         return NO_INIT;
@@ -6960,6 +7020,7 @@ status_t AudioFlinger::EffectModule::configure(bool isForLPA, int sampleRate, in
     }
 
     // TODO: handle configuration of effects replacing track process
+#ifdef WITH_QCOM_LPA
     mIsForLPA = isForLPA;
     if(isForLPA) {
         if (channelCount == 1) {
@@ -6969,12 +7030,15 @@ status_t AudioFlinger::EffectModule::configure(bool isForLPA, int sampleRate, in
         }
         LOGV("%s: LPA ON - channels %d", __func__, channels);
     } else {
+#endif
         if (thread->channelCount() == 1) {
             channels = AUDIO_CHANNEL_OUT_MONO;
         } else {
             channels = AUDIO_CHANNEL_OUT_STEREO;
         }
+#ifdef WITH_QCOM_LPA
     }
+#endif
 
     if ((mDescriptor.flags & EFFECT_FLAG_TYPE_MASK) == EFFECT_FLAG_TYPE_AUXILIARY) {
         mConfig.inputCfg.channels = AUDIO_CHANNEL_OUT_MONO;
@@ -6984,12 +7048,16 @@ status_t AudioFlinger::EffectModule::configure(bool isForLPA, int sampleRate, in
     mConfig.outputCfg.channels = channels;
     mConfig.inputCfg.format = AUDIO_FORMAT_PCM_16_BIT;
     mConfig.outputCfg.format = AUDIO_FORMAT_PCM_16_BIT;
+#ifdef WITH_QCOM_LPA
     if(isForLPA){
         mConfig.inputCfg.samplingRate = sampleRate;
         LOGV("%s: LPA ON - sampleRate %d", __func__, sampleRate);
     } else {
+#endif
         mConfig.inputCfg.samplingRate = thread->sampleRate();
+#ifdef WITH_QCOM_LPA
     }
+#endif
     mConfig.outputCfg.samplingRate = mConfig.inputCfg.samplingRate;
     mConfig.inputCfg.bufferProvider.cookie = NULL;
     mConfig.inputCfg.bufferProvider.getBuffer = NULL;
@@ -7014,12 +7082,16 @@ status_t AudioFlinger::EffectModule::configure(bool isForLPA, int sampleRate, in
     }
     mConfig.inputCfg.mask = EFFECT_CONFIG_ALL;
     mConfig.outputCfg.mask = EFFECT_CONFIG_ALL;
+#ifdef WITH_QCOM_LPA
     if(isForLPA) {
         mConfig.inputCfg.buffer.frameCount = frameCount;
         LOGV("%s: LPA ON - frameCount %d", __func__, frameCount);
     } else {
+#endif
         mConfig.inputCfg.buffer.frameCount = thread->frameCount();
+#ifdef WITH_QCOM_LPA
     }
+#endif
     mConfig.outputCfg.buffer.frameCount = mConfig.inputCfg.buffer.frameCount;
 
     LOGV("configure() %p thread %p buffer %p framecount %d",
@@ -7167,13 +7239,17 @@ status_t AudioFlinger::EffectModule::command(uint32_t cmdCode,
 
 status_t AudioFlinger::EffectModule::setEnabled(bool enabled)
 {
+#ifdef WITH_QCOM_LPA
     bool effectStateChanged = false;
     {
+#endif
         Mutex::Autolock _l(mLock);
         LOGV("setEnabled %p enabled %d", this, enabled);
 
         if (enabled != isEnabled()) {
+#ifdef WITH_QCOM_LPA
             effectStateChanged = true;
+#endif
             status_t status = AudioSystem::setEffectEnabled(mId, enabled);
             if (enabled && status != NO_ERROR) {
                 return status;
@@ -7211,6 +7287,7 @@ status_t AudioFlinger::EffectModule::setEnabled(bool enabled)
                 }
             }
         }
+#ifdef WITH_QCOM_LPA
     }
     /*
        Send notification event to LPA Player when an effect for
@@ -7220,6 +7297,7 @@ status_t AudioFlinger::EffectModule::setEnabled(bool enabled)
         sp<ThreadBase> thread = mThread.promote();
         thread->effectConfigChanged();
     }
+#endif
     return NO_ERROR;
 }
 
@@ -7651,6 +7729,7 @@ status_t AudioFlinger::EffectHandle::command(uint32_t cmdCode,
         return disable();
     }
 
+#ifdef WITH_QCOM_LPA
     LOGV("EffectHandle::command: isOnLPA %d", mEffect->isOnLPA());
     if(mEffect->isOnLPA() &&
        ((cmdCode == EFFECT_CMD_SET_PARAM) || (cmdCode == EFFECT_CMD_SET_PARAM_DEFERRED) ||
@@ -7661,6 +7740,7 @@ status_t AudioFlinger::EffectHandle::command(uint32_t cmdCode,
         LOGV("Notifying LPA player for the change in effect config");
         mClient->audioFlinger()->audioConfigChanged_l(AudioSystem::EFFECT_CONFIG_CHANGED, 0, NULL);
     }
+#endif
 
     return mEffect->command(cmdCode, cmdSize, pCmdData, replySize, pReplyData);
 }
@@ -7733,7 +7813,14 @@ AudioFlinger::EffectChain::EffectChain(const wp<ThreadBase>& wThread,
                                         int sessionId)
     : mThread(wThread), mSessionId(sessionId), mActiveTrackCnt(0), mTrackCnt(0), mTailBufferCount(0),
       mOwnInBuffer(false), mVolumeCtrlIdx(-1), mLeftVolume(UINT_MAX), mRightVolume(UINT_MAX),
-      mNewLeftVolume(UINT_MAX), mNewRightVolume(UINT_MAX), mIsForLPATrack(false)
+      mNewLeftVolume(UINT_MAX),
+#ifndef WITH_QCOM_LPA
+      mNewRightVolume(UINT_MAX)
+#else
+      mNewRightVolume(UINT_MAX),
+      mIsForLPATrack(false)
+#endif
+
 {
     mStrategy = AudioSystem::getStrategyForStream(AUDIO_STREAM_MUSIC);
     sp<ThreadBase> thread = mThread.promote();
@@ -7783,6 +7870,7 @@ sp<AudioFlinger::EffectModule> AudioFlinger::EffectChain::getEffectFromId_l(int 
     return effect;
 }
 
+#ifdef WITH_QCOM_LPA
 sp<AudioFlinger::EffectModule> AudioFlinger::EffectChain::getEffectFromIndex_l(int idx)
 {
     sp<EffectModule> effect = NULL;
@@ -7794,6 +7882,7 @@ sp<AudioFlinger::EffectModule> AudioFlinger::EffectChain::getEffectFromIndex_l(i
     }
     return effect;
 }
+#endif
 
 // getEffectFromType_l() must be called with ThreadBase::mLock held
 sp<AudioFlinger::EffectModule> AudioFlinger::EffectChain::getEffectFromType_l(
@@ -7845,7 +7934,11 @@ void AudioFlinger::EffectChain::process_l()
     }
 
     size_t size = mEffects.size();
+#ifdef WITH_QCOM_LPA
     if (doProcess || isForLPATrack()) {
+#else
+    if (doProcess) {
+#endif
         for (size_t i = 0; i < size; i++) {
             mEffects[i]->process();
         }
