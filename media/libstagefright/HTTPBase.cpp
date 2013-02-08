@@ -45,9 +45,9 @@ HTTPBase::HTTPBase()
 
 // static
 sp<HTTPBase> HTTPBase::Create(uint32_t flags) {
-#if CHROMIUM_AVAILABLE
-        return new ChromiumHTTPDataSource(flags);
-#endif
+//#if CHROMIUM_AVAILABLE
+//        return new ChromiumHTTPDataSource(flags);
+//#endif
     {
         TRESPASS();
 
