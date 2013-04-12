@@ -370,14 +370,12 @@ void AudioSystem::releaseAudioSessionId(int audioSession) {
     }
 }
 
-/*
 status_t AudioSystem::setFmVolume(float value)
 {
     const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
     if (af == 0) return PERMISSION_DENIED;
     return af->setFmVolume(value);
 }
-*/
 
 // ---------------------------------------------------------------------------
 
@@ -586,7 +584,7 @@ audio_io_handle_t AudioSystem::getOutput(audio_stream_type_t stream,
     // to the first use case we want to cover (Voice Recognition and Voice Dialer over
     // Bluetooth SCO
     if ((flags & AUDIO_POLICY_OUTPUT_FLAG_DIRECT) == 0 &&
-        //(stream != AUDIO_STREAM_FM) &&
+        (stream != AUDIO_STREAM_FM) &&
         ((stream != AUDIO_STREAM_VOICE_CALL && stream != AUDIO_STREAM_BLUETOOTH_SCO) ||
          channels != AUDIO_CHANNEL_OUT_MONO ||
          (samplingRate != 8000 && samplingRate != 16000))) {
@@ -606,7 +604,6 @@ audio_io_handle_t AudioSystem::getOutput(audio_stream_type_t stream,
     return output;
 }
 
-#ifdef WITH_QCOM_LPA
 audio_io_handle_t AudioSystem::getSession(audio_stream_type_t stream,
                                           uint32_t      format,
                                           audio_policy_output_flags_t flags,
@@ -625,7 +622,6 @@ audio_io_handle_t AudioSystem::getSession(audio_stream_type_t stream,
 
     return output;
 }
-#endif
 
 status_t AudioSystem::startOutput(audio_io_handle_t output,
                                   audio_stream_type_t stream,
@@ -652,7 +648,6 @@ void AudioSystem::releaseOutput(audio_io_handle_t output)
     aps->releaseOutput(output);
 }
 
-#ifdef WITH_QCOM_LPA
 status_t AudioSystem::pauseSession(audio_io_handle_t output, audio_stream_type_t stream)
 {
     const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
@@ -673,7 +668,6 @@ void AudioSystem::closeSession(audio_io_handle_t output)
     if (aps == 0) return;
     aps->closeSession(output);
 }
-#endif
 
 audio_io_handle_t AudioSystem::getInput(int inputSource,
                                     uint32_t samplingRate,
@@ -804,90 +798,5 @@ void AudioSystem::AudioPolicyServiceClient::binderDied(const wp<IBinder>& who) {
     LOGW("AudioPolicyService server died!");
 }
 
-#ifdef USES_AUDIO_LEGACY
-extern "C" uint32_t _ZN7android11AudioSystem8popCountEj(uint32_t u)
-{
-    return popcount(u);
-}
-
-extern "C" bool _ZN7android11AudioSystem12isA2dpDeviceENS0_13audio_devicesE(uint32_t device)
-{
-    return audio_is_a2dp_device((audio_devices_t)device);
-}
-
-extern "C" bool _ZN7android11AudioSystem13isInputDeviceENS0_13audio_devicesE(uint32_t device)
-{
-    return audio_is_input_device((audio_devices_t)device);
-}
-
-extern "C" bool _ZN7android11AudioSystem14isOutputDeviceENS0_13audio_devicesE(uint32_t device)
-{
-    return audio_is_output_device((audio_devices_t)device);
-}
-
-extern "C" bool _ZN7android11AudioSystem20isBluetoothScoDeviceENS0_13audio_devicesE(uint32_t device)
-{
-    return audio_is_bluetooth_sco_device((audio_devices_t)device);
-}
-
-extern "C" status_t _ZN7android11AudioSystem24setDeviceConnectionStateENS0_13audio_devicesENS0_23device_connection_stateEPKc(audio_devices_t device,
-                                               audio_policy_dev_state_t state,
-                                               const char *device_address) 
-{
-    return AudioSystem::setDeviceConnectionState(device, state, device_address);
-}
-
-extern "C" audio_io_handle_t _ZN7android11AudioSystem9getOutputENS0_11stream_typeEjjjNS0_12output_flagsE(audio_stream_type_t stream,
-                                    uint32_t samplingRate,
-                                    uint32_t format,
-                                    uint32_t channels,
-                                    audio_policy_output_flags_t flags) 
-{
-   return AudioSystem::getOutput(stream,samplingRate,format,channels>>2,flags);
-}
-
-extern "C" bool _ZN7android11AudioSystem11isLinearPCMEj(uint32_t format)
-{
-    return audio_is_linear_pcm(format);
-}
-
-extern "C" bool _ZN7android11AudioSystem15isLowVisibilityENS0_11stream_typeE(audio_stream_type_t stream)
-{
-    if (stream == AUDIO_STREAM_SYSTEM ||
-        stream == AUDIO_STREAM_NOTIFICATION ||
-        stream == AUDIO_STREAM_RING) {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-#endif // AUDIO_LEGACY
-
-#ifdef USE_SAMSUNG_SEPARATEDSTREAM
-extern "C" bool _ZN7android11AudioSystem17isSeparatedStreamE19audio_stream_type_t(audio_stream_type_t stream)
-{
-    LOGD("android::AudioSystem::isSeparatedStream(audio_stream_type_t) called!");
-    LOGD("audio_stream_type_t: %d", stream);
-
-/* this is the correct implementation, but breaks headset volume rocker.
-    if (stream == 3  || stream == 9  || stream == 10
-     || stream == 12 || stream == 13 || stream == 14)
-    {
-        LOGD("isSeparatedStream: true");
-        return true;
-    }
-*/
-
-    LOGD("isSeparatedStream: false");
-    return false;
-}
-
-extern "C" bool _ZN7android11AudioSystem10stopOutputEiNS0_11stream_typeEi(audio_io_handle_t output, audio_stream_type_t stream, int session)
-{
-    return AudioSystem::stopOutput(output, stream, session);
-}
-
-#endif // USE_SAMSUNG_SEPARATEDSTREAM
-
 }; // namespace android
+

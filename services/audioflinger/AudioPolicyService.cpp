@@ -292,7 +292,6 @@ audio_io_handle_t AudioPolicyService::getOutput(audio_stream_type_t stream,
     return mpAudioPolicy->get_output(mpAudioPolicy, stream, samplingRate, format, channels, flags);
 }
 
-#ifdef WITH_QCOM_LPA
 audio_io_handle_t AudioPolicyService::getSession(audio_stream_type_t stream,
                                     uint32_t format,
                                     audio_policy_output_flags_t flags,
@@ -305,7 +304,6 @@ audio_io_handle_t AudioPolicyService::getSession(audio_stream_type_t stream,
     Mutex::Autolock _l(mLock);
     return mpAudioPolicy->get_session(mpAudioPolicy, stream, format, flags, sessionId);
 }
-#endif
 
 status_t AudioPolicyService::startOutput(audio_io_handle_t output,
                                          audio_stream_type_t stream,
@@ -341,7 +339,6 @@ void AudioPolicyService::releaseOutput(audio_io_handle_t output)
     mpAudioPolicy->release_output(mpAudioPolicy, output);
 }
 
-#ifdef WITH_QCOM_LPA
 status_t AudioPolicyService::pauseSession(audio_io_handle_t output,
                                           audio_stream_type_t stream)
 {
@@ -399,7 +396,6 @@ status_t AudioPolicyService::closeSession(audio_io_handle_t output)
 
     return af->closeSession(output);
 }
-#endif
 
 audio_io_handle_t AudioPolicyService::getInput(int inputSource,
                                     uint32_t samplingRate,
@@ -826,8 +822,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     }
                     delete data;
                     }break;
-/*               
-    	case SET_FM_VOLUME: {
+               case SET_FM_VOLUME: {
                     FmVolumeData *data = (FmVolumeData *)command->mParam;
                     LOGV("AudioCommandThread() processing set fm volume volume %f", data->mVolume);
                     command->mStatus = AudioSystem::setFmVolume(data->mVolume);
@@ -837,7 +832,6 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     }
                     delete data;
                     }break;
-*/
                 default:
                     LOGW("AudioCommandThread() unknown command %d", command->mCommand);
                 }
@@ -1009,7 +1003,6 @@ status_t AudioPolicyService::AudioCommandThread::voiceVolumeCommand(float volume
     return status;
 }
 
-/*
 status_t AudioPolicyService::AudioCommandThread::fmVolumeCommand(float volume, int delayMs)
 {
     status_t status = NO_ERROR;
@@ -1035,7 +1028,7 @@ status_t AudioPolicyService::AudioCommandThread::fmVolumeCommand(float volume, i
     }
     return status;
 }
-*/
+
 
 // insertCommand_l() must be called with mLock held
 void AudioPolicyService::AudioCommandThread::insertCommand_l(AudioCommand *command, int delayMs)
@@ -1099,11 +1092,9 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(AudioCommand *comma
                     data->mIO, data->mStream);
             removedCommands.add(command2);
         } break;
-/*
         case SET_FM_VOLUME: {
             removedCommands.add(command2);
         } break;
-*/
         case START_TONE:
         case STOP_TONE:
         default:
@@ -1169,12 +1160,10 @@ int AudioPolicyService::setStreamVolume(audio_stream_type_t stream,
                                                    (int)output, delayMs);
 }
 
-/*
 status_t AudioPolicyService::setFmVolume(float volume, int delayMs)
 {
     return mAudioCommandThread->fmVolumeCommand(volume, delayMs);
 }
-*/
 
 int AudioPolicyService::startTone(audio_policy_tone_t tone,
                                   audio_stream_type_t stream)
@@ -1515,7 +1504,6 @@ static audio_io_handle_t aps_open_output(void *service,
                           pLatencyMs, flags);
 }
 
-#ifdef WITH_QCOM_LPA
 static audio_io_handle_t aps_open_session(void *service,
                                 uint32_t *pDevices,
                                 uint32_t *pFormat,
@@ -1541,7 +1529,7 @@ static int aps_close_session(void *service, audio_io_handle_t output)
 
     return af->closeSession(output);
 }
-#endif
+
 
 static audio_io_handle_t aps_open_dup_output(void *service,
                                                  audio_io_handle_t output1,
@@ -1680,24 +1668,20 @@ static int aps_set_voice_volume(void *service, float volume, int delay_ms)
     return audioPolicyService->setVoiceVolume(volume, delay_ms);
 }
 
-/*
 static int aps_set_fm_volume(void *service, float volume, int delay_ms)
 {
     AudioPolicyService *audioPolicyService = (AudioPolicyService *)service;
 
     return audioPolicyService->setFmVolume(volume, delay_ms);
 }
-*/
 
 }; // extern "C"
 
 namespace {
     struct audio_policy_service_ops aps_ops = {
         open_output           : aps_open_output,
-#ifdef WITH_QCOM_LPA
         open_session          : aps_open_session,
         close_session         : aps_close_session,
-#endif
         open_duplicate_output : aps_open_dup_output,
         close_output          : aps_close_output,
         suspend_output        : aps_suspend_output,
@@ -1712,7 +1696,7 @@ namespace {
         stop_tone             : aps_stop_tone,
         set_voice_volume      : aps_set_voice_volume,
         move_effects          : aps_move_effects,
-//        set_fm_volume         : aps_set_fm_volume,
+        set_fm_volume         : aps_set_fm_volume,
     };
 }; // namespace <unnamed>
 

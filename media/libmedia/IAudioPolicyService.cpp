@@ -37,12 +37,10 @@ enum {
     SET_FORCE_USE,
     GET_FORCE_USE,
     GET_OUTPUT,
-#ifdef WITH_QCOM_LPA
     GET_SESSION,
     PAUSE_SESSION,
     RESUME_SESSION,
     CLOSE_SESSION,
-#endif
     START_OUTPUT,
     STOP_OUTPUT,
     RELEASE_OUTPUT,
@@ -152,7 +150,6 @@ public:
         remote()->transact(GET_OUTPUT, data, &reply);
         return static_cast <audio_io_handle_t> (reply.readInt32());
     }
-#ifdef WITH_QCOM_LPA
     virtual audio_io_handle_t getSession(
                                         audio_stream_type_t stream,
                                         uint32_t format,
@@ -197,7 +194,6 @@ public:
         remote()->transact(CLOSE_SESSION, data, &reply);
         return static_cast <audio_io_handle_t> (reply.readInt32());
     }
-#endif
 
     virtual status_t startOutput(audio_io_handle_t output,
                                  audio_stream_type_t stream,
@@ -493,7 +489,6 @@ status_t BnAudioPolicyService::onTransact(
             return NO_ERROR;
         } break;
 
-#ifdef WITH_QCOM_LPA
         case GET_SESSION: {
             CHECK_INTERFACE(IAudioPolicyService, data, reply);
             audio_stream_type_t stream = static_cast <audio_stream_type_t>(data.readInt32());
@@ -533,7 +528,6 @@ status_t BnAudioPolicyService::onTransact(
             reply->writeInt32(static_cast <int>(status));
             return NO_ERROR;
         } break;
-#endif
 
         case START_OUTPUT: {
             CHECK_INTERFACE(IAudioPolicyService, data, reply);

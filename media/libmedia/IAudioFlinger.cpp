@@ -40,9 +40,7 @@ enum {
     SET_MASTER_MUTE,
     MASTER_VOLUME,
     MASTER_MUTE,
-#ifdef WITH_QCOM_LPA
     SET_SESSION_VOLUME,
-#endif
     SET_STREAM_VOLUME,
     SET_STREAM_MUTE,
     STREAM_VOLUME,
@@ -55,16 +53,12 @@ enum {
     REGISTER_CLIENT,
     GET_INPUTBUFFERSIZE,
     OPEN_OUTPUT,
-#ifdef WITH_QCOM_LPA
     OPEN_SESSION,
-#endif
     OPEN_DUPLICATE_OUTPUT,
     CLOSE_OUTPUT,
-#ifdef WITH_QCOM_LPA
     PAUSE_SESSION,
     RESUME_SESSION,
     CLOSE_SESSION,
-#endif
     SUSPEND_OUTPUT,
     RESTORE_OUTPUT,
     OPEN_INPUT,
@@ -81,12 +75,10 @@ enum {
     GET_EFFECT_DESCRIPTOR,
     CREATE_EFFECT,
     MOVE_EFFECTS,
-#ifdef WITH_QCOM_LPA
     SET_FM_VOLUME,
     CREATE_SESSION,
     DELETE_SESSION,
     APPLY_EFFECTS
-#endif
 };
 
 class BpAudioFlinger : public BpInterface<IAudioFlinger>
@@ -144,7 +136,6 @@ public:
         return track;
     }
 
-#ifdef WITH_QCOM_LPA
     virtual void createSession(
                         pid_t pid,
                         uint32_t sampleRate,
@@ -199,7 +190,6 @@ public:
             LOGE("applyEffectsOn error: %s", strerror(-lStatus));
         }
     }
-#endif
 
     virtual sp<IAudioRecord> openRecord(
                                 pid_t pid,
@@ -323,7 +313,6 @@ public:
         return reply.readInt32();
     }
 
-#ifdef WITH_QCOM_LPA
     virtual status_t setSessionVolume(int stream, float left, float right)
     {
         Parcel data, reply;
@@ -334,7 +323,6 @@ public:
         remote()->transact(SET_SESSION_VOLUME, data, &reply);
         return reply.readInt32();
     }
-#endif
 
     virtual status_t setStreamVolume(int stream, float value, int output)
     {
@@ -478,7 +466,6 @@ public:
         return output;
     }
 
-#ifdef WITH_QCOM_LPA
     virtual int openSession(uint32_t *pDevices,
                             uint32_t *pFormat,
                             uint32_t flags,
@@ -533,7 +520,7 @@ public:
         remote()->transact(CLOSE_SESSION, data, &reply);
         return reply.readInt32();
     }
-#endif
+
 
     virtual int openDuplicateOutput(int output1, int output2)
     {
@@ -808,7 +795,6 @@ public:
         return reply.readInt32();
     }
 
-/*
     virtual status_t setFmVolume(float volume)
     {
         Parcel data, reply;
@@ -817,7 +803,6 @@ public:
         remote()->transact(SET_FM_VOLUME, data, &reply);
         return reply.readInt32();
     }
-*/
 };
 
 IMPLEMENT_META_INTERFACE(AudioFlinger, "android.media.IAudioFlinger");
@@ -849,7 +834,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeStrongBinder(track->asBinder());
             return NO_ERROR;
         } break;
-#ifdef WITH_QCOM_LPA
         case CREATE_SESSION: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             pid_t pid = data.readInt32();
@@ -875,7 +859,6 @@ status_t BnAudioFlinger::onTransact(
             applyEffectsOn(inBuffer, outBuffer, size);
             return NO_ERROR;
         } break;
-#endif
         case OPEN_RECORD: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             pid_t pid = data.readInt32();
@@ -939,7 +922,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32( masterMute() );
             return NO_ERROR;
         } break;
-#ifdef WITH_QCOM_LPA
         case SET_SESSION_VOLUME: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             int stream = data.readInt32();
@@ -948,7 +930,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32( setSessionVolume(stream, left, right) );
             return NO_ERROR;
         } break;
-#endif
         case SET_STREAM_VOLUME: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             int stream = data.readInt32();
@@ -1045,7 +1026,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32(latency);
             return NO_ERROR;
         } break;
-#ifdef WITH_QCOM_LPA
         case OPEN_SESSION: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             uint32_t devices = data.readInt32();
@@ -1085,7 +1065,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32(closeSession(data.readInt32()));
             return NO_ERROR;
         } break;
-#endif
         case OPEN_DUPLICATE_OUTPUT: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             int output1 = data.readInt32();
@@ -1243,19 +1222,12 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32(moveEffects(session, srcOutput, dstOutput));
             return NO_ERROR;
         } break;
-        //case SET_FM_VOLUME: {
-#ifdef STE_AUDIO
-        case READ_INPUT: {
+        case SET_FM_VOLUME: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
-            uint32_t* input = (uint32_t*) data.readIntPtr();
-            uint32_t inputClientId = data.readInt32();
-            void* buffer = (void*) data.readIntPtr();
-            uint32_t bytes = data.readInt32();
-            uint32_t *pOverwrittenBytes = (uint32_t*) data.readIntPtr();
-            reply->writeInt32(readInput(input, inputClientId, buffer, bytes, pOverwrittenBytes));
+            float volume = data.readFloat();
+            reply->writeInt32( setFmVolume(volume) );
             return NO_ERROR;
         } break;
-#endif
         default:
             return BBinder::onTransact(code, data, reply, flags);
     }
