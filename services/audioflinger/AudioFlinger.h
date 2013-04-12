@@ -135,18 +135,6 @@ public:
                                     uint32_t *pLatencyMs,
                                     uint32_t flags);
 
-    virtual int openSession(   uint32_t *pDevices,
-                                    uint32_t *pFormat,
-                                    uint32_t flags,
-                                    int32_t  streamType,
-                                    int32_t  sessionId);
-
-    virtual status_t pauseSession(int output, int32_t  streamType);
-
-    virtual status_t resumeSession(int output, int32_t  streamType);
-
-    virtual status_t closeSession(int output);
-
     virtual int openDuplicateOutput(int output1, int output2);
 
     virtual status_t closeOutput(int output);
@@ -194,8 +182,6 @@ public:
                         int *enabled);
 
     virtual status_t moveEffects(int sessionId, int srcOutput, int dstOutput);
-
-    virtual status_t setFmVolume(float volume);
 
     enum hardware_call_state {
         AUDIO_HW_IDLE = 0,

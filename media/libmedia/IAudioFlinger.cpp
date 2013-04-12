@@ -1026,45 +1026,6 @@ status_t BnAudioFlinger::onTransact(
             reply->writeInt32(latency);
             return NO_ERROR;
         } break;
-        case OPEN_SESSION: {
-            CHECK_INTERFACE(IAudioFlinger, data, reply);
-            uint32_t devices = data.readInt32();
-            uint32_t format = data.readInt32();
-            uint32_t flags = data.readInt32();
-            int32_t  stream = data.readInt32();
-            int32_t  sessionId = data.readInt32();
-            int output = openSession(&devices,
-                                     &format,
-                                     flags,
-                                     stream,
-                                     sessionId);
-            LOGV("OPEN_SESSION output, %p", output);
-            reply->writeInt32(output);
-            reply->writeInt32(devices);
-            reply->writeInt32(format);
-            return NO_ERROR;
-        } break;
-        case PAUSE_SESSION: {
-            CHECK_INTERFACE(IAudioFlinger, data, reply);
-            int output = data.readInt32();
-            int32_t  stream = data.readInt32();
-            reply->writeInt32(pauseSession(output,
-                                           stream));
-            return NO_ERROR;
-        } break;
-        case RESUME_SESSION: {
-            CHECK_INTERFACE(IAudioFlinger, data, reply);
-            int output = data.readInt32();
-            int32_t  stream = data.readInt32();
-            reply->writeInt32(resumeSession(output,
-                                           stream));
-            return NO_ERROR;
-        } break;
-        case CLOSE_SESSION: {
-            CHECK_INTERFACE(IAudioFlinger, data, reply);
-            reply->writeInt32(closeSession(data.readInt32()));
-            return NO_ERROR;
-        } break;
         case OPEN_DUPLICATE_OUTPUT: {
             CHECK_INTERFACE(IAudioFlinger, data, reply);
             int output1 = data.readInt32();
@@ -1220,12 +1181,6 @@ status_t BnAudioFlinger::onTransact(
             int srcOutput = data.readInt32();
             int dstOutput = data.readInt32();
             reply->writeInt32(moveEffects(session, srcOutput, dstOutput));
-            return NO_ERROR;
-        } break;
-        case SET_FM_VOLUME: {
-            CHECK_INTERFACE(IAudioFlinger, data, reply);
-            float volume = data.readFloat();
-            reply->writeInt32( setFmVolume(volume) );
             return NO_ERROR;
         } break;
         default:

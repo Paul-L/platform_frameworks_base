@@ -254,11 +254,6 @@ AudioFlinger::~AudioFlinger()
         // closeOutput() will remove first entry from mPlaybackThreads
         closeOutput(mPlaybackThreads.keyAt(0));
     }
-    if (mLPAOutput) {
-        // Close the Output
-        closeSession(mLPAHandle);
-    }
-
     for (int i = 0; i < num_devs; i++) {
         audio_hw_device_t *dev = mAudioHwDevs[i];
         audio_hw_device_close(dev);
@@ -1175,26 +1170,6 @@ status_t AudioFlinger::getRenderPosition(uint32_t *halFrames, uint32_t *dspFrame
     }
 
     return BAD_VALUE;
-}
-
-status_t AudioFlinger::setFmVolume(float value)
-{
-    status_t ret = initCheck();
-    if (ret != NO_ERROR) {
-        return ret;
-    }
-
-    // check calling permissions
-    if (!settingsAllowed()) {
-        return PERMISSION_DENIED;
-    }
-
-    AutoMutex lock(mHardwareLock);
-    mHardwareStatus = AUDIO_SET_FM_VOLUME;
-    ret = mPrimaryHardwareDev->set_fm_volume(mPrimaryHardwareDev, value);
-    mHardwareStatus = AUDIO_HW_IDLE;
-
-    return ret;
 }
 
 void AudioFlinger::registerClient(const sp<IAudioFlingerClient>& client)
@@ -5448,93 +5423,6 @@ int AudioFlinger::openOutput(uint32_t *pDevices,
     }
 
     return 0;
-}
-
-int AudioFlinger::openSession(uint32_t *pDevices,
-                                   uint32_t *pFormat,
-                                   uint32_t flags,
-                                   int32_t  streamType,
-                                   int32_t  sessionId)
-{
-    status_t status;
-    mHardwareStatus = AUDIO_HW_OUTPUT_OPEN;
-    uint32_t format = pFormat ? *pFormat : 0;
-    audio_stream_out_t *outStream;
-    audio_hw_device_t *outHwDev;
-
-    LOGV("openSession(), Device %x, Format %d, flags %x sessionId %x",
-            pDevices ? *pDevices : 0,
-            format,
-            flags,
-            sessionId);
-
-    if (pDevices == NULL || *pDevices == 0) {
-        return 0;
-    }
-    Mutex::Autolock _l(mLock);
-
-    outHwDev = findSuitableHwDev_l(*pDevices);
-    if (outHwDev == NULL)
-        return 0;
-    status = outHwDev->open_output_session(outHwDev, *pDevices, (int *)&format,sessionId,&outStream);
-
-    LOGV("openSession() openOutputSession returned output %p, Format %d, status %d",
-            outStream,
-            format,
-            status);
-
-    mHardwareStatus = AUDIO_HW_IDLE;
-
-    if (outStream != NULL) {
-        mLPAOutput = new AudioStreamOut(outHwDev, outStream);
-        int id = nextUniqueId();
-        mLPAHandle = id;
-        mLPAStreamType = streamType;
-        mLPAStreamIsActive = true;
-        if (pFormat) *pFormat = format;
-        return id;
-    }
-    return 0;
-}
-
-status_t AudioFlinger::pauseSession(int output, int32_t  streamType)
-{
-    if (output == mLPAHandle && streamType == mLPAStreamType ) {
-        mLPAStreamIsActive = false;
-    }
-
-    return NO_ERROR;
-}
-
-status_t AudioFlinger::resumeSession(int output, int32_t  streamType)
-{
-    if (output == mLPAHandle && streamType == mLPAStreamType ) {
-        mLPAStreamIsActive = true;
-    }
-
-    return NO_ERROR;
-}
-
-status_t AudioFlinger::closeSession(int output)
-{
-    Mutex::Autolock _l(mLock);
-    LOGV("closeSession() %d", output);
-
-    // Is this required?
-    //AudioSystem::stopOutput(output, (AudioSystem::stream_type)mStreamType);
-
-    // Delete the Audio session
-    if (mLPAOutput && (output == mLPAHandle)) {
-        mLPAOutput->stream->common.standby(&mLPAOutput->stream->common);
-        mLPAOutput->hwDev->close_output_stream(mLPAOutput->hwDev, mLPAOutput->stream);
-        delete mLPAOutput;
-        mLPAOutput = NULL;
-        mLPAHandle = -1;
-        mLPAStreamIsActive = false;
-        mLPAStreamType = -1;
-    }
-
-    return NO_ERROR;
 }
 
 int AudioFlinger::openDuplicateOutput(int output1, int output2)

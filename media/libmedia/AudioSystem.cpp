@@ -370,13 +370,6 @@ void AudioSystem::releaseAudioSessionId(int audioSession) {
     }
 }
 
-status_t AudioSystem::setFmVolume(float value)
-{
-    const sp<IAudioFlinger>& af = AudioSystem::get_audio_flinger();
-    if (af == 0) return PERMISSION_DENIED;
-    return af->setFmVolume(value);
-}
-
 // ---------------------------------------------------------------------------
 
 void AudioSystem::AudioFlingerClient::binderDied(const wp<IBinder>& who) {
@@ -604,25 +597,6 @@ audio_io_handle_t AudioSystem::getOutput(audio_stream_type_t stream,
     return output;
 }
 
-audio_io_handle_t AudioSystem::getSession(audio_stream_type_t stream,
-                                          uint32_t      format,
-                                          audio_policy_output_flags_t flags,
-                                          int           sessionId)
-{
-    audio_io_handle_t output = 0;
-
-    if ((flags & AUDIO_POLICY_OUTPUT_FLAG_DIRECT) == 0) {
-        return 0;
-    }
-
-    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
-    if (aps == 0) return 0;
-
-    output = aps->getSession(stream, format, flags, sessionId);
-
-    return output;
-}
-
 status_t AudioSystem::startOutput(audio_io_handle_t output,
                                   audio_stream_type_t stream,
                                   int session)
@@ -646,27 +620,6 @@ void AudioSystem::releaseOutput(audio_io_handle_t output)
     const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
     if (aps == 0) return;
     aps->releaseOutput(output);
-}
-
-status_t AudioSystem::pauseSession(audio_io_handle_t output, audio_stream_type_t stream)
-{
-    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
-    if (aps == 0) return PERMISSION_DENIED;
-    return aps->pauseSession(output, stream);
-}
-
-status_t AudioSystem::resumeSession(audio_io_handle_t output, audio_stream_type_t stream)
-{
-    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
-    if (aps == 0) return PERMISSION_DENIED;
-    return aps->resumeSession(output, stream);
-}
-
-void AudioSystem::closeSession(audio_io_handle_t output)
-{
-    const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
-    if (aps == 0) return;
-    aps->closeSession(output);
 }
 
 audio_io_handle_t AudioSystem::getInput(int inputSource,

@@ -54,6 +54,7 @@ status_t AudioTrack::getMinFrameCount(
         int streamType,
         uint32_t sampleRate)
 {
+#ifdef QCOM_HARDWARE
     if(streamType == AUDIO_STREAM_VOICE_CALL) {
         LOGV("AudioTrack :: getMinFramecount voice call \n");
         if(sampleRate == 8000) {
@@ -63,6 +64,7 @@ status_t AudioTrack::getMinFrameCount(
         }
         return NO_ERROR;
     }
+#endif
 
     int afSampleRate;
     if (AudioSystem::getOutputSamplingRate(&afSampleRate, streamType) != NO_ERROR) {
@@ -87,6 +89,38 @@ status_t AudioTrack::getMinFrameCount(
 }
 
 // ---------------------------------------------------------------------------
+
+#ifdef USE_KINETO_COMPATIBILITY
+// Really dirty hack to give a Froyo-compatible constructor
+extern "C" AudioTrack *_ZN7android10AudioTrackC1EijiiijPFviPvS1_ES1_ii(
+        AudioTrack *This,
+        int streamType,
+        uint32_t sampleRate,
+        int format,
+        int channels,
+        int frameCount,
+        uint32_t flags,
+        AudioTrack::callback_t cbf,
+        void* user,
+        int notificationFrames,
+        int sessionId);
+extern "C" AudioTrack *_ZN7android10AudioTrackC1EijiiijPFviPvS1_ES1_i(
+        AudioTrack *This,
+        int streamType,
+        uint32_t sampleRate,
+        int format,
+        int channels,
+        int frameCount,
+        uint32_t flags,
+        AudioTrack::callback_t cbf,
+        void* user,
+        int notificationFrames)
+{
+    return _ZN7android10AudioTrackC1EijiiijPFviPvS1_ES1_ii(This,
+        streamType, sampleRate, format, channels,
+        frameCount, flags, cbf, user, notificationFrames, 0);
+}
+#endif
 
 AudioTrack::AudioTrack()
     : mStatus(NO_INIT)
@@ -128,7 +162,7 @@ AudioTrack::AudioTrack(
             0, flags, cbf, user, notificationFrames,
             sharedBuffer, false, sessionId);
 }
-
+#ifdef WITH_QCOM_LPA
 AudioTrack::AudioTrack(
         int streamType,
         uint32_t sampleRate,
@@ -141,7 +175,7 @@ AudioTrack::AudioTrack(
 {
     mStatus = set(streamType, sampleRate, format, channels, flags, sessionId, lpaSessionId);
 }
-
+#endif
 AudioTrack::~AudioTrack()
 {
     LOGV_IF(mSharedBuffer != 0, "Destructor sharedBuffer: %p", mSharedBuffer->pointer());
@@ -155,6 +189,9 @@ AudioTrack::~AudioTrack()
             mAudioTrackThread->requestExitAndWait();
             mAudioTrackThread.clear();
         }
+#ifndef WITH_QCOM_LPA
+        mAudioTrack.clear();
+#else
         if(mAudioTrack != NULL) {
             mAudioTrack.clear();
             AudioSystem::releaseAudioSessionId(mSessionId);
@@ -172,8 +209,11 @@ AudioTrack::~AudioTrack()
             AudioSystem::closeSession(mAudioSession);
             mAudioSession = -1;
         }
-
+#endif
         IPCThreadState::self()->flushCommands();
+#ifndef WITH_QCOM_LPA
+        AudioSystem::releaseAudioSessionId(mSessionId);
+#endif
     }
 }
 
@@ -300,12 +340,15 @@ status_t AudioTrack::set(
     mUpdatePeriod = 0;
     mFlushed = false;
     mFlags = flags;
+#ifdef WITH_QCOM_LPA
     mAudioSession = -1;
+#endif
     AudioSystem::acquireAudioSessionId(mSessionId);
     mRestoreStatus = NO_ERROR;
     return NO_ERROR;
 }
 
+#ifdef WITH_QCOM_LPA
 status_t AudioTrack::set(
         int streamType,
         uint32_t sampleRate,
@@ -387,7 +430,7 @@ status_t AudioTrack::set(
     LOGV("AudioTrack::set() - Started output(%d)",output);
     return NO_ERROR;
 }
-
+#endif
 status_t AudioTrack::initCheck() const
 {
     return mStatus;
@@ -438,6 +481,7 @@ sp<IMemory>& AudioTrack::sharedBuffer()
 
 void AudioTrack::start()
 {
+#ifdef WITH_QCOM_LPA
     if ( mAudioSession != -1  ) {
         if ( NO_ERROR != AudioSystem::resumeSession(mAudioSession,
                                    (audio_stream_type_t)mStreamType) )
@@ -446,7 +490,7 @@ void AudioTrack::start()
         }
         return;
     }
-
+#endif
     sp<AudioTrackThread> t = mAudioTrackThread;
     status_t status = NO_ERROR;
 
@@ -522,7 +566,9 @@ void AudioTrack::stop()
 
     AutoMutex lock(mLock);
     if (mActive == 1) {
+#ifdef WITH_QCOM_LPA
         if (mAudioTrack != NULL) {
+#endif
             mActive = 0;
             mCblk->cv.signal();
             mAudioTrack->stop();
@@ -542,7 +588,9 @@ void AudioTrack::stop()
             } else {
                 setpriority(PRIO_PROCESS, 0, ANDROID_PRIORITY_NORMAL);
             }
+#ifdef WITH_QCOM_LPA
         }
+#endif
     }
 
     if (t != 0) {
@@ -583,7 +631,7 @@ void AudioTrack::flush_l()
 void AudioTrack::pause()
 {
     LOGV("pause");
-
+#ifdef WITH_QCOM_LPA
     if ( mAudioSession != -1 ) {
         if ( NO_ERROR != AudioSystem::pauseSession(mAudioSession,
                                   (audio_stream_type_t)mStreamType) )
@@ -592,6 +640,7 @@ void AudioTrack::pause()
         }
         return;
     }
+#endif
     AutoMutex lock(mLock);
     if (mActive == 1) {
         mActive = 0;
@@ -618,12 +667,14 @@ status_t AudioTrack::setVolume(float left, float right)
 
     AutoMutex lock(mLock);
 
+#ifdef WITH_QCOM_LPA
     if(mAudioSession != -1) {
         // LPA output
         const sp<IAudioFlinger>& audioFlinger = AudioSystem::get_audio_flinger();
         status_t status = audioFlinger->setSessionVolume(mStreamType, left, right);
         return NO_ERROR;
     }
+#endif
 
     mVolume[LEFT] = left;
     mVolume[RIGHT] = right;
