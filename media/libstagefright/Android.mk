@@ -162,7 +162,7 @@ ifneq ($(strip $(ARCH_ARM_HAVE_ARMV7A)),true)
 endif
 
 # See if the user has specified a stack they want to use
-HTTP_STACK = android
+HTTP_STACK = $(HTTP)
 # We default to the Chrome HTTP stack.
 DEFAULT_HTTP = chrome
 ALT_HTTP = android
